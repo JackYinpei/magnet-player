@@ -20,6 +20,12 @@ func LoadEnv() error {
 	return err
 }
 
+func LoadEnvFrom(path string) {
+	once.Do(func() {
+		godotenv.Load(path)
+	})
+}
+
 // GetEnvWithDefault gets an environment variable or returns the default value if not found
 func GetEnvWithDefault(key, defaultValue string) string {
 	value := os.Getenv(key)

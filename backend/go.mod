@@ -7,6 +7,7 @@ toolchain go1.23.6
 require (
 	github.com/anacrolix/torrent v1.58.1
 	github.com/joho/godotenv v1.5.1
+	github.com/sashabaranov/go-openai v1.38.0
 	modernc.org/sqlite v1.21.1
 )
 

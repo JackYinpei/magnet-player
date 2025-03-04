@@ -1,16 +1,17 @@
 package search
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 
+	openai "github.com/sashabaranov/go-openai"
+	jsonschema "github.com/sashabaranov/go-openai/jsonschema"
 	"github.com/torrentplayer/backend/backend"
 )
 
@@ -93,106 +94,85 @@ type TMDBMovieDetails struct {
 	} `json:"genres"`
 }
 
+type SearchFileResponse struct {
+	FileName string `json:"filename"`
+	Year     int    `json:"year"`
+}
+
+func StructSearchFile(magnet_filename string) (*SearchFileResponse, error) {
+
+	config := openai.DefaultConfig(backend.GetEnv("JINA_API_KEY"))
+	config.BaseURL = "https://deepsearch.jina.ai/v1"
+	client := openai.NewClientWithConfig(config)
+
+	schema, _ := jsonschema.GenerateSchemaForType(SearchFileResponse{})
+	resp, err := client.CreateChatCompletion(
+		context.Background(),
+		openai.ChatCompletionRequest{
+			Model: "jina-deepsearch-v1",
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: "你现在要帮用户根据一个magnet 文件名获取这个magnet 中的电影名称，以及电影上映的年份，并且最后只返回json格式的数据，例如用户输入的是\"s子w：m法s传q.2024.HD1080p.中文字幕.mp4\"，那么你就要在网上搜索用户要处理的信息并加上\"电影\" 关键字，并根据互联网信息然后推断出这部电影的名字是\"狮子王: 木法沙传奇\",然后你回答的就只能是一个json格式的字符串数据\"{\"filename\":\"狮子王: 木法沙传奇\",\"year\":2024}\"\", 不要带任何\"根据提供的文件...\" 等等这种额外信息。",
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: magnet_filename,
+				},
+			},
+			ResponseFormat: &openai.ChatCompletionResponseFormat{
+				Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
+				JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+					Name:        "SearchFileResponse",
+					Description: "你现在要帮用户根据一个magnet 文件名获取这个magnet 中的电影名称，以及电影上映的年份，并且最后只返回json格式的数据，例如用户输入的是\"s子w：m法s传q.2024.HD1080p.中文字幕.mp4\", 然后你回答的就只能是一个json格式的字符串数据\"{\"filename\":\"狮子王: 木法沙传奇\",\"year\":2024}\"",
+					Strict:      true,
+					Schema:      schema,
+				},
+			},
+		},
+	)
+
+	if err != nil {
+		fmt.Printf("ChatCompletion error: %v\n", err)
+		return nil, errors.New("error making API request: " + err.Error())
+	}
+
+	fmt.Println(resp.Choices[0].Message.Content)
+	// Extract the content which should be a JSON string
+	content := resp.Choices[0].Message.Content
+
+	// Find the closing curly brace and trim everything after it
+	if idx := strings.LastIndex(content, "}"); idx >= 0 {
+		content = content[:idx+1]
+	}
+	var result SearchFileResponse
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return nil, fmt.Errorf("error parsing content as SearchFileResponse: %w", err)
+	}
+
+	return &result, nil
+}
+
 func SearchMovie(magnet_filename string) (MovieInfo, error) {
 	if magnet_filename == "" {
 		return MovieInfo{}, fmt.Errorf("missing magnet_filename parameter")
 	}
-	url := "https://deepsearch.jina.ai/v1/chat/completions"
 
-	payload := []byte(fmt.Sprintf(`
-{	
-"model": "jina-deepsearch-v1",
-"messages": [
-{
-"role": "user",
-"content": "你现在要帮用户根据一个magnet 文件名获取这个magnet 中的电影名称，以及电影上映的年份，并且最后只返回json格式的数据，例如用户输入的是"s子w：m法s传q.2024.HD1080p.中文字幕.mp4"，那么你就要在网上搜索用户要处理的信息并加上"电影" 关键字，并根据互联网信息然后推断出这部电影的名字是"狮子王: 木法沙传奇",然后你回答的就只能是一个json格式的字符串数据"{\"filename\":\"狮子王: 木法沙传奇\",\"year\":2024}", 不要带任何"根据提供的文件..." 等等这种额外信息。"
-},
-{
-"role": "user",
-"content": "这里就是你要处理的信息%s"
-}
-],
-"stream": false,
-"reasoning_effort": "low",
-"max_attempts": 2
-}`, magnet_filename))
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+	movieInfo, err := StructSearchFile(magnet_filename)
 	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return MovieInfo{}, fmt.Errorf("error creating request")
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	apiKey := backend.GetEnv("JINA_API_KEY")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println("Error making request:", err)
-		return MovieInfo{}, fmt.Errorf("error making request to AI service")
-	}
-	defer resp.Body.Close()
-
-	fmt.Println("Response Status:", resp.Status)
-
-	// Read the response body
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Println("Error reading response body:", err)
-		return MovieInfo{}, fmt.Errorf("error reading response from AI service")
-	}
-
-	// Parse the Jina API response
-	var jinaResp JinaResponse
-	if err := json.Unmarshal(bodyBytes, &jinaResp); err != nil {
-		fmt.Println("Error parsing JSON response:", err)
-		return MovieInfo{}, fmt.Errorf("error parsing response from AI service")
-	}
-
-	// Check if we have a valid response
-	if len(jinaResp.Choices) == 0 || jinaResp.Choices[0].Message.Content == "" {
-		fmt.Println("Invalid response from AI service")
-		return MovieInfo{}, fmt.Errorf("invalid response from AI service")
-	}
-
-	// Extract the movie info from the AI response
-	content := jinaResp.Choices[0].Message.Content
-
-	// Clean up the content by removing any non-JSON text
-	// Look for JSON within the response using regex
-	re := regexp.MustCompile(`\{.*\}`)
-	jsonMatch := re.FindString(content)
-
-	if jsonMatch == "" {
-		fmt.Println("Could not find JSON in response:", content)
-		return MovieInfo{}, fmt.Errorf("could not extract movie information from AI response")
-	}
-
-	// Parse the extracted JSON
-	var movieInfo MovieInfo
-	if err := json.Unmarshal([]byte(jsonMatch), &movieInfo); err != nil {
-		fmt.Println("Error parsing movie info JSON:", err)
-		fmt.Println("Raw JSON:", jsonMatch)
-		return MovieInfo{}, fmt.Errorf("error parsing movie information")
-	}
-
-	// Ensure we have a non-empty filename
-	if movieInfo.Filename == "" {
-		fmt.Println("Empty movie name in response")
-		return MovieInfo{}, fmt.Errorf("could not determine movie name")
+		return MovieInfo{}, fmt.Errorf("error struct searching file: %w", err)
 	}
 
 	// Try to get complete movie details from TMDB
-	updatedMovieInfo, err := GetMovieDetails(movieInfo.Filename, movieInfo.Year)
+	updatedMovieInfo, err := GetMovieDetails(movieInfo.FileName, movieInfo.Year)
 	if err != nil {
 		// Just log the error and continue with basic info
 		fmt.Printf("Warning: couldn't get movie details: %v\n", err)
-		return movieInfo, nil
+		return MovieInfo{}, nil
 	}
 
 	// Copy over the original filename to preserve it
-	updatedMovieInfo.Filename = movieInfo.Filename
+	updatedMovieInfo.Filename = movieInfo.FileName
 
 	// Return the complete movie info
 	return updatedMovieInfo, nil
@@ -215,31 +195,24 @@ func GetMovieDetails(movieName string, year int) (MovieInfo, error) {
 		return MovieInfo{}, fmt.Errorf("TMDB_API_KEY environment variable not set")
 	}
 
-	// First, search for the movie to get its TMDB ID
-	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/movie?api_key=%s&query=%s",
-		tmdbAPIKey, url.QueryEscape(movieName))
+	url := "https://api.themoviedb.org/3/search/movie?query=%s&include_adult=true&page=1&year=%d"
 
-	// Add year to search query if available
-	if year > 0 {
-		searchURL += fmt.Sprintf("&year=%d", year)
-	}
+	req, _ := http.NewRequest("GET", fmt.Sprintf(url, movieName, year), nil)
 
-	// Make the search request
-	resp, err := http.Get(searchURL)
+	req.Header.Add("accept", "application/json")
+	req.Header.Add("Authorization", "Bearer "+tmdbAPIKey)
+
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return MovieInfo{}, fmt.Errorf("error making request to TMDB search API: %w", err)
+		return MovieInfo{}, err
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return MovieInfo{}, fmt.Errorf("TMDB search API returned non-OK status: %s", resp.Status)
-	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
 
 	// Read and parse the search response
 	var searchResp TMDBSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-		return MovieInfo{}, fmt.Errorf("error parsing TMDB search response: %w", err)
-	}
+	json.Unmarshal(body, &searchResp)
 
 	// Check if we found any results
 	if len(searchResp.Results) == 0 {
@@ -249,26 +222,24 @@ func GetMovieDetails(movieName string, year int) (MovieInfo, error) {
 	// Get the first result's ID
 	movieID := searchResp.Results[0].ID
 
-	// Now get the detailed movie information
-	detailsURL := fmt.Sprintf("https://api.themoviedb.org/3/movie/%d?api_key=%s",
-		movieID, tmdbAPIKey)
+	detailUrl := "https://api.themoviedb.org/3/movie/%d?language=zh-CN"
 
-	// Make the details request
-	detailsResp, err := http.Get(detailsURL)
+	detailReq, _ := http.NewRequest("GET", fmt.Sprintf(detailUrl, movieID), nil)
+
+	detailReq.Header.Add("accept", "application/json")
+	detailReq.Header.Add("Authorization", "Bearer "+tmdbAPIKey)
+
+	detailRes, err := http.DefaultClient.Do(detailReq)
 	if err != nil {
-		return MovieInfo{}, fmt.Errorf("error making request to TMDB details API: %w", err)
+		return MovieInfo{}, err
 	}
-	defer detailsResp.Body.Close()
 
-	if detailsResp.StatusCode != http.StatusOK {
-		return MovieInfo{}, fmt.Errorf("TMDB details API returned non-OK status: %s", detailsResp.Status)
-	}
+	defer detailRes.Body.Close()
+	detailBody, _ := io.ReadAll(detailRes.Body)
 
 	// Read and parse the details response
 	var details TMDBMovieDetails
-	if err := json.NewDecoder(detailsResp.Body).Decode(&details); err != nil {
-		return MovieInfo{}, fmt.Errorf("error parsing TMDB details response: %w", err)
-	}
+	json.Unmarshal(detailBody, &details)
 
 	// Extract the release year from release date
 	releaseYear := 0
