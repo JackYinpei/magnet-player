@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import Link from 'next/link';
-import { formatFileSize, formatProgress } from '@/lib/api';
+import Image from 'next/image';
+import { formatFileSize, formatProgress, getMovieInfo } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 
-export function TorrentList({ torrents = [], onTorrentSelected }) {  
+export function TorrentList({ torrents = [], onTorrentSelected }) {
   const [selectedTorrentId, setSelectedTorrentId] = useState(null);
+  const [moviesInfo, setMoviesInfo] = useState({});
+  const [expandedOverviews, setExpandedOverviews] = useState({});
 
   const getStateBadgeVariant = (state) => {
     switch (state) {
@@ -29,6 +32,27 @@ export function TorrentList({ torrents = [], onTorrentSelected }) {
     }
   };
 
+  const toggleOverview = (infoHash) => {
+    setExpandedOverviews(prev => ({
+      ...prev,
+      [infoHash]: !prev[infoHash]
+    }));
+  };
+
+  const fetchMovieInfo = async (torrent) => {
+    try {
+      const movie = await getMovieInfo(torrent.name);
+      if (movie) {
+        setMoviesInfo(prev => ({
+          ...prev,
+          [torrent.infoHash]: movie
+        }));
+      }
+    } catch (error) {
+      console.error("Failed to fetch movie info:", error);
+    }
+  };
+
   if (!torrents || torrents.length === 0) {
     return (
       <Card className="w-full mt-4">
@@ -41,49 +65,117 @@ export function TorrentList({ torrents = [], onTorrentSelected }) {
 
   return (
     <div className="space-y-4 mt-4">
-      {torrents.map((torrent) => (
-        <Card 
-          key={torrent.infoHash}
-          className={`cursor-pointer hover:border-primary transition-colors ${
-            selectedTorrentId === torrent.infoHash ? 'border-primary' : ''
-          }`}
-          onClick={() => handleTorrentClick(torrent)}
-        >
-          <CardHeader className="pb-2">
-            <div className="flex justify-between items-start">
-              <CardTitle className="text-xl truncate">{torrent.name}</CardTitle>
-              <Badge variant={getStateBadgeVariant(torrent.state)} className="ml-2">
-                {torrent.state}
-              </Badge>
-            </div>
-          </CardHeader>
-          
-          <CardContent>
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm text-muted-foreground">
-                <span>Progress: {formatProgress(torrent.progress)}</span>
-                <span>{formatFileSize(torrent.downloaded)} / {formatFileSize(torrent.length)}</span>
+      {torrents.map((torrent) => {
+        const movie = moviesInfo[torrent.infoHash];
+        const isExpanded = expandedOverviews[torrent.infoHash];
+        
+        return (
+          <Card
+            key={torrent.infoHash}
+            className={`cursor-pointer hover:border-primary transition-colors ${selectedTorrentId === torrent.infoHash ? 'border-primary' : ''
+              }`}
+            onClick={() => handleTorrentClick(torrent)}
+          >
+            <CardHeader className="pb-2">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <CardTitle className="text-xl truncate">
+                    {movie ? `${movie.filename}${movie.year ? ` (${movie.year})` : ''}` : torrent.name}
+                  </CardTitle>
+                  {movie && movie.genres && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {movie.genres.map((genre, index) => (
+                        <Badge key={index} variant="outline" className="text-xs">
+                          {genre}
+                        </Badge>
+                      ))}
+                      {movie.rating && (
+                        <Badge variant="secondary" className="ml-2">
+                          ⭐ {movie.rating.toFixed(1)}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <Badge variant={getStateBadgeVariant(torrent.state)} className="ml-2 shrink-0">
+                  {torrent.state}
+                </Badge>
               </div>
-              <Progress value={torrent.progress * 100} />
-              
-              <div className="flex justify-between text-sm mt-2">
-                <span className="text-muted-foreground">Added: {new Date(torrent.addedAt).toLocaleString()}</span>
-                <span className="text-muted-foreground">{torrent.files?.length || 0} files</span>
+            </CardHeader>
+
+            <CardContent>
+              {movie && movie.posterUrl && (
+                <div className="flex gap-4 mb-4">
+                  <div className="relative w-24 h-36 shrink-0 overflow-hidden rounded">
+                    <Image 
+                      src={movie.posterUrl} 
+                      alt={movie.filename || torrent.name}
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 768px) 100px, 150px"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    {movie.overview && (
+                      <div className="mb-2">
+                        <h4 className="text-sm font-medium mb-1">简介:</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {isExpanded ? movie.overview : `${movie.overview.substring(0, 100)}...`}
+                          <Button 
+                            variant="link" 
+                            className="p-0 h-auto text-xs ml-1" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleOverview(torrent.infoHash);
+                            }}
+                          >
+                            {isExpanded ? '收起' : '展开'}
+                          </Button>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm text-muted-foreground">
+                  <span>Progress: {formatProgress(torrent.progress)}</span>
+                  <span>{formatFileSize(torrent.downloaded)} / {formatFileSize(torrent.length)}</span>
+                </div>
+                <Progress value={torrent.progress * 100} />
+
+                <div className="flex justify-between text-sm mt-2">
+                  <span className="text-muted-foreground">Added: {new Date(torrent.addedAt).toLocaleString()}</span>
+                  <span className="text-muted-foreground">{torrent.files?.length || 0} files</span>
+                </div>
               </div>
-            </div>
-          </CardContent>
-          
-          <CardFooter className="pt-2">
-            <div className="flex justify-end w-full">
+            </CardContent>
+
+            <CardFooter className="pt-2 flex justify-between flex-wrap gap-2">
+              {!movie ? (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fetchMovieInfo(torrent);
+                  }}
+                >
+                  获取电影详情
+                </Button>
+              ) : (
+                <div></div> // Empty div for spacing when button is not shown
+              )}
               <Link href={`/torrent/${torrent.infoHash}`} passHref legacyBehavior>
                 <Button variant="outline" size="sm" as="a">
                   View Files
                 </Button>
               </Link>
-            </div>
-          </CardFooter>
-        </Card>
-      ))}
+            </CardFooter>
+          </Card>
+        );
+      })}
     </div>
   );
 }

@@ -16,6 +16,7 @@
 /frontend/build/
 /frontend/.vercel/
 /frontend/.env*.local
+/frontend/.env
 
 # IDE and OS specific files
 .DS_Store

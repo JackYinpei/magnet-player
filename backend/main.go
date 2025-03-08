@@ -35,11 +35,11 @@ func main() {
 	apiHandler := api.NewHandler(torrentClient)
 
 	// Configure HTTP server
-	http.HandleFunc("/api/magnet", apiHandler.AddMagnet)
-	http.HandleFunc("/api/torrents", apiHandler.ListTorrents)
-	http.HandleFunc("/api/files", apiHandler.ListFiles)
-	http.HandleFunc("/stream/", apiHandler.StreamFile)
-	http.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/magnet/api/magnet", apiHandler.AddMagnet)
+	http.HandleFunc("/magnet/api/torrents", apiHandler.ListTorrents)
+	http.HandleFunc("/magnet/api/files", apiHandler.ListFiles)
+	http.HandleFunc("/magnet/stream/", apiHandler.StreamFile)
+	http.HandleFunc("/magnet/search", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -63,7 +63,7 @@ func main() {
 	})
 
 	// Enable CORS
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/magnet/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
