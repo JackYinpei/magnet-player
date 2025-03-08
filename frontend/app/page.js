@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { listTorrents } from '@/lib/api';
 import { TorrentForm } from '@/components/torrent-form';
 import { TorrentList } from '@/components/torrent-list';
@@ -12,20 +12,46 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('torrents');
+  const isInitialLoadRef = useRef(true);
+  const prevTorrentsRef = useRef([]);
   
   // 加载种子列表
   const loadTorrents = async () => {
     try {
-      setLoading(true);
+      // 仅在初始加载时设置 loading 为 true
+      if (isInitialLoadRef.current) {
+        setLoading(true);
+      }
+      
       const data = await listTorrents();
-      setTorrents(data || []);  
-      setError(null);
+      const newTorrents = data || [];
+      
+      // 检查数据是否有变化，仅在数据变化时更新状态
+      const hasChanged = JSON.stringify(newTorrents) !== JSON.stringify(prevTorrentsRef.current);
+      if (hasChanged || isInitialLoadRef.current) {
+        setTorrents(newTorrents);
+        prevTorrentsRef.current = newTorrents;
+      }
+      
+      // 只在有错误时或初始加载时重置错误状态
+      if (error || isInitialLoadRef.current) {
+        setError(null);
+      }
     } catch (err) {
       console.error('Failed to load torrents:', err);
       setError('无法加载种子列表。请确保后端服务正在运行。');
-      setTorrents([]);  
+      
+      // 只在数据已存在或初始加载时重置种子列表
+      if (prevTorrentsRef.current.length > 0 || isInitialLoadRef.current) {
+        setTorrents([]);
+        prevTorrentsRef.current = [];
+      }
     } finally {
-      setLoading(false);
+      // 仅在初始加载时更新 loading 状态
+      if (isInitialLoadRef.current) {
+        setLoading(false);
+        isInitialLoadRef.current = false;
+      }
     }
   };
 
@@ -40,7 +66,9 @@ export default function Home() {
 
   // 处理新添加的种子
   const handleTorrentAdded = (newTorrent) => {
-    loadTorrents(); // 重新加载完整列表
+    // 强制重新加载，并将初始加载状态设置为 true 以显示加载指示器
+    isInitialLoadRef.current = true;
+    loadTorrents();
   };
 
   return (

@@ -1,6 +1,6 @@
 // API client for the Torrent Player backend
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL ? process.env.NEXT_PUBLIC_BACKEND_API_URL : "http://localhost:8080";
+const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL ? process.env.NEXT_PUBLIC_BACKEND_API_URL : "http://localhost:8080/magnet";
 
 // 通用请求处理器，增强错误处理
 async function fetchWithErrorHandling(url, options = {}) {
