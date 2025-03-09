@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	urlPkg "net/url"
 	"strconv"
 	"strings"
 
@@ -99,7 +100,7 @@ type SearchFileResponse struct {
 	Year     int    `json:"year"`
 }
 
-func StructSearchFile(magnet_filename string) (*SearchFileResponse, error) {
+func StructSearchFile(magnet_filename string) (SearchFileResponse, error) {
 
 	config := openai.DefaultConfig(backend.GetEnv("JINA_API_KEY"))
 	config.BaseURL = "https://deepsearch.jina.ai/v1"
@@ -134,7 +135,7 @@ func StructSearchFile(magnet_filename string) (*SearchFileResponse, error) {
 
 	if err != nil {
 		fmt.Printf("ChatCompletion error: %v\n", err)
-		return nil, errors.New("error making API request: " + err.Error())
+		return SearchFileResponse{}, errors.New("error making API request: " + err.Error())
 	}
 
 	fmt.Println(resp.Choices[0].Message.Content)
@@ -145,12 +146,13 @@ func StructSearchFile(magnet_filename string) (*SearchFileResponse, error) {
 	if idx := strings.LastIndex(content, "}"); idx >= 0 {
 		content = content[:idx+1]
 	}
+	fmt.Println("content", content)
 	var result SearchFileResponse
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, fmt.Errorf("error parsing content as SearchFileResponse: %w", err)
+		return SearchFileResponse{}, fmt.Errorf("error parsing content as SearchFileResponse: %w", err)
 	}
 
-	return &result, nil
+	return result, nil
 }
 
 func SearchMovie(magnet_filename string) (MovieInfo, error) {
@@ -197,7 +199,7 @@ func GetMovieDetails(movieName string, year int) (MovieInfo, error) {
 
 	url := "https://api.themoviedb.org/3/search/movie?query=%s&include_adult=true&page=1&year=%d"
 
-	req, _ := http.NewRequest("GET", fmt.Sprintf(url, movieName, year), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf(url, urlPkg.QueryEscape(movieName), year), nil)
 
 	req.Header.Add("accept", "application/json")
 	req.Header.Add("Authorization", "Bearer "+tmdbAPIKey)

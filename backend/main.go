@@ -1,15 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/torrentplayer/backend/api"
+	searchhandle "github.com/torrentplayer/backend/api/search"
 	"github.com/torrentplayer/backend/backend"
-	"github.com/torrentplayer/backend/service/search"
 	"github.com/torrentplayer/backend/torrent"
 )
 
@@ -39,28 +38,7 @@ func main() {
 	http.HandleFunc("/magnet/api/torrents", apiHandler.ListTorrents)
 	http.HandleFunc("/magnet/api/files", apiHandler.ListFiles)
 	http.HandleFunc("/magnet/stream/", apiHandler.StreamFile)
-	http.HandleFunc("/magnet/search", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		filename := r.URL.Query().Get("filename")
-		if filename == "" {
-			http.Error(w, "Missing filename parameter", http.StatusBadRequest)
-			return
-		}
-		movieInfo, err := search.SearchMovie(filename)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(movieInfo)
-	})
+	http.HandleFunc("/magnet/search", searchhandle.SearchMovieHandler)
 
 	// Enable CORS
 	http.HandleFunc("/magnet/", func(w http.ResponseWriter, r *http.Request) {
