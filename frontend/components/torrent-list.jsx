@@ -41,7 +41,32 @@ export function TorrentList({ torrents = [], onTorrentSelected }) {
 
   const fetchMovieInfo = async (torrent) => {
     try {
-      const movie = await getMovieInfo(torrent.name);
+      // Original API call code (commented out to avoid charges)
+      // const movie = await getMovieInfo(torrent.name);
+      
+      // Using test data instead
+      const movie = {
+        "filename": "蜡笔小新：我们的恐龙日记",
+        "year": 2024,
+        "posterUrl": "https://image.tmdb.org/t/p/original/dTBhi2Y674JHaAktl550vpmxjF5.jpg",
+        "backdropUrl": "https://image.tmdb.org/t/p/original/vW7lwVHkRePHzayZfoKOyYBeZqO.jpg",
+        "overview": "在野原新之助的五岁暑假，东京新开了一个现代复活恐龙的主题公园，迎来了前所未有的恐龙热潮。而在春日部河滩旁，小白也偶遇到了一个新朋友——纳纳，随着春日部防卫队和纳纳的相处，恐龙公园背后的真相也随之揭露，巨大恐龙突然暴走街头，这次他们能否成功化解危机呢？",
+        "rating": 5.7,
+        "voteCount": 20,
+        "genres": [
+          "动画",
+          "冒险",
+          "喜剧",
+          "家庭"
+        ],
+        "runtime": 106,
+        "tmdbId": 1221404,
+        "releaseDate": "2024-08-09",
+        "originalTitle": "映画クレヨンしんちゃん オラたちの恐竜日記",
+        "popularity": 18.581,
+        "status": "Released"
+      };
+      
       if (movie) {
         setMoviesInfo(prev => ({
           ...prev,

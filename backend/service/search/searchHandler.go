@@ -6,14 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	urlPkg "net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 	jsonschema "github.com/sashabaranov/go-openai/jsonschema"
 	"github.com/torrentplayer/backend/backend"
+	"github.com/torrentplayer/backend/coze"
 )
 
 // MovieInfo represents the structured response we want to return to the frontend
@@ -100,6 +103,52 @@ type SearchFileResponse struct {
 	Year     int    `json:"year"`
 }
 
+func StructSearchFileViaCoze(magnet_filename string) (SearchFileResponse, error) {
+	var cozeClient = coze.NewCozeClient(coze.RegionCOM)
+
+	apiResp, err := cozeClient.RequestBot(magnet_filename)
+	if err != nil {
+		return SearchFileResponse{}, err
+	}
+	log.Println("apiResp:", apiResp)
+
+	timeout := time.After(50 * time.Second)
+	for {
+		select {
+		case <-timeout:
+			return SearchFileResponse{}, fmt.Errorf("timeout waiting for response")
+		default:
+			apiResp, err = cozeClient.GetResponse(apiResp.Data.ConversationID, apiResp.Data.ID)
+			if err != nil {
+				return SearchFileResponse{}, err
+			}
+			if apiResp.Data.Status == "completed" {
+				aiResp, err := cozeClient.GetConversationList(apiResp.Data.ConversationID, apiResp.Data.ID)
+				if err != nil {
+					return SearchFileResponse{}, err
+				}
+				for _, data := range aiResp.Data {
+					if data.Role == "assistant" && data.Type == "answer" {
+						content := data.Content
+						// Find the closing curly brace and trim everything after it
+						if idx := strings.LastIndex(content, "}"); idx >= 0 {
+							content = content[:idx+1]
+						}
+						fmt.Println("content", content)
+						var result SearchFileResponse
+						if err := json.Unmarshal([]byte(content), &result); err != nil {
+							return SearchFileResponse{}, fmt.Errorf("error parsing content as SearchFileResponse: %w", err)
+						}
+						return result, nil
+					}
+				}
+				return SearchFileResponse{}, nil
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}
+}
+
 func StructSearchFile(magnet_filename string) (SearchFileResponse, error) {
 
 	config := openai.DefaultConfig(backend.GetEnv("JINA_API_KEY"))
@@ -160,7 +209,7 @@ func SearchMovie(magnet_filename string) (MovieInfo, error) {
 		return MovieInfo{}, fmt.Errorf("missing magnet_filename parameter")
 	}
 
-	movieInfo, err := StructSearchFile(magnet_filename)
+	movieInfo, err := StructSearchFileViaCoze(magnet_filename)
 	if err != nil {
 		return MovieInfo{}, fmt.Errorf("error struct searching file: %w", err)
 	}
