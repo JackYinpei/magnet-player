@@ -121,7 +121,35 @@ export function formatProgress(progress) {
   return `${Math.round(progress * 100)}%`;
 }
 
-
+/**
+ * 获取电影信息
+ * @param {string} name 种子名称
+ * @returns {Promise<Object>} 电影信息
+ */
 export async function getMovieInfo(name) {
   return fetchWithErrorHandling(`${API_BASE_URL}/search?filename=${name}`);
+}
+
+/**
+ * 保存电影详情信息到服务器
+ * @param {string} infoHash 种子的 info hash
+ * @param {Object} movie 电影详情信息
+ * @returns {Promise<Object>} 保存结果
+ */
+export async function saveMovieDetails(infoHash, movie) {
+  if (!infoHash) {
+    throw new Error('Info hash 不能为空');
+  }
+  
+  if (!movie) {
+    throw new Error('电影详情不能为空');
+  }
+  
+  return fetchWithErrorHandling(`${API_BASE_URL}/api/movie-details`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ infoHash, movie }),
+  });
 }

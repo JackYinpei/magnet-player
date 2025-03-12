@@ -9,6 +9,7 @@ import (
 	"github.com/torrentplayer/backend/api"
 	searchhandle "github.com/torrentplayer/backend/api/search"
 	"github.com/torrentplayer/backend/backend"
+	"github.com/torrentplayer/backend/db"
 	"github.com/torrentplayer/backend/torrent"
 )
 
@@ -30,8 +31,16 @@ func main() {
 	}
 	defer torrentClient.Close()
 
+	// Initialize torrent store for database operations
+	dbPath := filepath.Join(dataDir, "torrents.db")
+	torrentStore, err := db.NewTorrentStore(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to create torrent store: %v", err)
+	}
+	defer torrentStore.Close()
+
 	// Setup API handlers
-	apiHandler := api.NewHandler(torrentClient)
+	apiHandler := api.NewHandler(torrentClient, torrentStore)
 
 	// Configure HTTP server
 	http.HandleFunc("/magnet/api/magnet", apiHandler.AddMagnet)
@@ -39,6 +48,8 @@ func main() {
 	http.HandleFunc("/magnet/api/files", apiHandler.ListFiles)
 	http.HandleFunc("/magnet/stream/", apiHandler.StreamFile)
 	http.HandleFunc("/magnet/search", searchhandle.SearchMovieHandler)
+	// Add new endpoint for updating movie details
+	http.HandleFunc("/magnet/api/movie-details", apiHandler.UpdateMovieDetails)
 
 	// Enable CORS
 	http.HandleFunc("/magnet/", func(w http.ResponseWriter, r *http.Request) {

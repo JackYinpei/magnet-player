@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/torrentplayer/backend/db"
 )
 
 // Client wraps the anacrolix/torrent client with our own functions
@@ -19,14 +20,15 @@ type Client struct {
 
 // TorrentInfo represents information about a torrent
 type TorrentInfo struct {
-	InfoHash   string     `json:"infoHash"`
-	Name       string     `json:"name"`
-	Length     int64      `json:"length"`
-	Files      []FileInfo `json:"files"`
-	Downloaded int64      `json:"downloaded"`
-	Progress   float32    `json:"progress"`
-	State      string     `json:"state"`
-	AddedAt    time.Time  `json:"addedAt"`
+	InfoHash     string     `json:"infoHash"`
+	Name         string     `json:"name"`
+	Length       int64      `json:"length"`
+	Files        []FileInfo `json:"files"`
+	Downloaded   int64      `json:"downloaded"`
+	Progress     float32    `json:"progress"`
+	State        string     `json:"state"`
+	AddedAt      time.Time  `json:"addedAt"`
+	MovieDetails *db.MovieDetails `json:"movieDetails,omitempty"`
 }
 
 // FileInfo represents information about a file in a torrent
@@ -310,6 +312,7 @@ func (c *Client) getTorrentInfo(t *torrent.Torrent) *TorrentInfo {
 		State:      state,
 		Files:      files,
 		AddedAt:    time.Now(),
+		MovieDetails: nil,
 	}
 }
 

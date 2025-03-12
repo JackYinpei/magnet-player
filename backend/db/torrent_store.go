@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -12,13 +13,42 @@ import (
 
 // TorrentRecord represents a stored torrent in the database
 type TorrentRecord struct {
-	InfoHash   string    `json:"infoHash"`
-	Name       string    `json:"name"`
-	MagnetURI  string    `json:"magnetUri"`
-	AddedAt    time.Time `json:"addedAt"`
-	MovieName  string    `json:"movieName,omitempty"`  // Official movie name from search
-	Year       int       `json:"year,omitempty"`       // Release year
-	PosterURL  string    `json:"posterUrl,omitempty"`  // URL to movie poster image
+	InfoHash     string    `json:"infoHash"`
+	Name         string    `json:"name"`
+	MagnetURI    string    `json:"magnetUri"`
+	AddedAt      time.Time `json:"addedAt"`
+	DataPath     string    `json:"dataPath,omitempty"`
+	MovieDetails *MovieDetails `json:"movieDetails,omitempty"`
+}
+
+// MovieDetails represents the movie information
+type MovieDetails struct {
+	Filename    string   `json:"filename"`
+	Year        int      `json:"year,omitempty"`
+	PosterUrl   string   `json:"posterUrl,omitempty"`
+	BackdropUrl string   `json:"backdropUrl,omitempty"`
+	Overview    string   `json:"overview,omitempty"`
+	Rating      float64  `json:"rating,omitempty"`
+	VoteCount   int      `json:"voteCount,omitempty"`
+	Genres      []string `json:"genres,omitempty"`
+	Runtime     int      `json:"runtime,omitempty"`
+	TmdbId      int      `json:"tmdbId,omitempty"`
+	ReleaseDate string   `json:"releaseDate,omitempty"`
+	OriginalTitle string `json:"originalTitle,omitempty"`
+	Popularity  float64  `json:"popularity,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	Files       []FileInfo `json:"files,omitempty"`
+}
+
+// FileInfo represents information about a file in a torrent
+type FileInfo struct {
+	Path       string  `json:"path"`
+	Length     int64   `json:"length"`
+	Progress   float32 `json:"progress"`
+	FileIndex  int     `json:"fileIndex"`
+	TorrentID  string  `json:"torrentId"`
+	IsVideo    bool    `json:"isVideo"`
+	IsPlayable bool    `json:"isPlayable"`
 }
 
 // TorrentStore handles the storage and retrieval of torrent information
@@ -41,67 +71,13 @@ func NewTorrentStore(dbPath string) (*TorrentStore, error) {
 			name TEXT,
 			magnet_uri TEXT NOT NULL,
 			added_at TIMESTAMP,
-			movie_name TEXT,
-			year INTEGER,
-			poster_url TEXT
+			data_path TEXT,
+			movie_details TEXT
 		)
 	`)
 	if err != nil {
 		db.Close()
 		return nil, err
-	}
-
-	// Check if new columns exist and add them if they don't
-	// This handles the migration for existing databases
-	var hasMovieName, hasYear, hasPosterURL bool
-	
-	// Check if movie_name column exists
-	rows, err := db.Query("PRAGMA table_info(torrents)")
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	defer rows.Close()
-	
-	for rows.Next() {
-		var cid int
-		var name, type_name string
-		var notnull, pk int
-		var dflt_value interface{}
-		if err := rows.Scan(&cid, &name, &type_name, &notnull, &dflt_value, &pk); err != nil {
-			db.Close()
-			return nil, err
-		}
-		
-		if name == "movie_name" {
-			hasMovieName = true
-		} else if name == "year" {
-			hasYear = true
-		} else if name == "poster_url" {
-			hasPosterURL = true
-		}
-	}
-	
-	// Add missing columns if needed
-	if !hasMovieName {
-		_, err = db.Exec("ALTER TABLE torrents ADD COLUMN movie_name TEXT")
-		if err != nil {
-			log.Printf("Error adding movie_name column: %v", err)
-		}
-	}
-	
-	if !hasYear {
-		_, err = db.Exec("ALTER TABLE torrents ADD COLUMN year INTEGER")
-		if err != nil {
-			log.Printf("Error adding year column: %v", err)
-		}
-	}
-	
-	if !hasPosterURL {
-		_, err = db.Exec("ALTER TABLE torrents ADD COLUMN poster_url TEXT")
-		if err != nil {
-			log.Printf("Error adding poster_url column: %v", err)
-		}
 	}
 
 	return &TorrentStore{
@@ -119,20 +95,39 @@ func (s *TorrentStore) SaveTorrent(record TorrentRecord) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	var movieDetailsJSON sql.NullString
+	if record.MovieDetails != nil {
+		movieDetailsBytes, err := json.Marshal(record.MovieDetails)
+		if err != nil {
+			return fmt.Errorf("failed to marshal movie details: %w", err)
+		}
+		movieDetailsJSON = sql.NullString{
+			String: string(movieDetailsBytes),
+			Valid:  true,
+		}
+	}
+
 	_, err := s.db.Exec(`
-		INSERT INTO torrents (info_hash, name, magnet_uri, added_at, movie_name, year, poster_url)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO torrents (info_hash, name, magnet_uri, added_at, data_path, movie_details)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(info_hash) DO UPDATE SET
 			name = ?,
 			magnet_uri = ?,
 			added_at = ?,
-			movie_name = ?,
-			year = ?,
-			poster_url = ?
-	`, record.InfoHash, record.Name, record.MagnetURI, record.AddedAt, 
-	   record.MovieName, record.Year, record.PosterURL,
-	   record.Name, record.MagnetURI, record.AddedAt,
-	   record.MovieName, record.Year, record.PosterURL)
+			data_path = ?,
+			movie_details = ?
+	`, 
+	record.InfoHash, 
+	record.Name, 
+	record.MagnetURI, 
+	record.AddedAt, 
+	record.DataPath, 
+	movieDetailsJSON,
+	record.Name, 
+	record.MagnetURI, 
+	record.AddedAt,
+	record.DataPath, 
+	movieDetailsJSON)
 	
 	return err
 }
@@ -148,9 +143,8 @@ func (s *TorrentStore) GetAllTorrents() ([]TorrentRecord, error) {
 			name, 
 			magnet_uri, 
 			added_at,
-			movie_name, 
-			year, 
-			poster_url
+			data_path,
+			movie_details
 		FROM torrents
 	`)
 	if err != nil {
@@ -162,18 +156,16 @@ func (s *TorrentStore) GetAllTorrents() ([]TorrentRecord, error) {
 	for rows.Next() {
 		var record TorrentRecord
 		var addedAt sql.NullTime
-		var movieName sql.NullString
-		var year sql.NullInt64
-		var posterURL sql.NullString
+		var dataPath sql.NullString
+		var movieDetailsJSON sql.NullString
 
 		err := rows.Scan(
 			&record.InfoHash, 
 			&record.Name, 
 			&record.MagnetURI, 
 			&addedAt,
-			&movieName,
-			&year,
-			&posterURL,
+			&dataPath,
+			&movieDetailsJSON,
 		)
 		if err != nil {
 			return nil, err
@@ -186,16 +178,17 @@ func (s *TorrentStore) GetAllTorrents() ([]TorrentRecord, error) {
 			record.AddedAt = time.Now() // Default to current time if null
 		}
 
-		if movieName.Valid {
-			record.MovieName = movieName.String
+		if dataPath.Valid {
+			record.DataPath = dataPath.String
 		}
 
-		if year.Valid {
-			record.Year = int(year.Int64)
-		}
-
-		if posterURL.Valid {
-			record.PosterURL = posterURL.String
+		if movieDetailsJSON.Valid {
+			var movieDetails MovieDetails
+			if err := json.Unmarshal([]byte(movieDetailsJSON.String), &movieDetails); err != nil {
+				log.Printf("Error unmarshaling movie details for %s: %v", record.InfoHash, err)
+			} else {
+				record.MovieDetails = &movieDetails
+			}
 		}
 
 		torrents = append(torrents, record)
@@ -213,19 +206,63 @@ func (s *TorrentStore) DeleteTorrent(infoHash string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	_, err := s.db.Exec(`DELETE FROM torrents WHERE info_hash = ?`, infoHash)
+	_, err := s.db.Exec("DELETE FROM torrents WHERE info_hash = ?", infoHash)
 	return err
 }
 
 // UpdateMovieInfo updates the movie information for a torrent
-func (s *TorrentStore) UpdateMovieInfo(infoHash string, movieName string, year int, posterURL string) error {
+func (s *TorrentStore) UpdateMovieInfo(infoHash string, movieDetails *MovieDetails) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	_, err := s.db.Exec(
-		`UPDATE torrents SET movie_name = ?, year = ?, poster_url = ? WHERE info_hash = ?`,
-		movieName, year, posterURL, infoHash,
-	)
+	var movieDetailsJSON sql.NullString
+	if movieDetails != nil {
+		movieDetailsBytes, err := json.Marshal(movieDetails)
+		if err != nil {
+			return fmt.Errorf("failed to marshal movie details: %w", err)
+		}
+		movieDetailsJSON = sql.NullString{
+			String: string(movieDetailsBytes),
+			Valid:  true,
+		}
+	}
+
+	_, err := s.db.Exec("UPDATE torrents SET movie_details = ? WHERE info_hash = ?", 
+		movieDetailsJSON, infoHash)
+	return err
+}
+
+// UpdateTorrentFiles updates the file information for a torrent
+func (s *TorrentStore) UpdateTorrentFiles(infoHash string, files []FileInfo) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// First get the current movie details
+	var movieDetailsJSON sql.NullString
+	err := s.db.QueryRow("SELECT movie_details FROM torrents WHERE info_hash = ?", infoHash).Scan(&movieDetailsJSON)
+	if err != nil {
+		return err
+	}
+
+	var movieDetails MovieDetails
+	if movieDetailsJSON.Valid {
+		if err := json.Unmarshal([]byte(movieDetailsJSON.String), &movieDetails); err != nil {
+			return fmt.Errorf("failed to unmarshal movie details: %w", err)
+		}
+	}
+
+	// Update the files field
+	movieDetails.Files = files
+
+	// Marshal back to JSON
+	updatedMovieDetailsBytes, err := json.Marshal(movieDetails)
+	if err != nil {
+		return fmt.Errorf("failed to marshal updated movie details: %w", err)
+	}
+
+	// Update the database
+	_, err = s.db.Exec("UPDATE torrents SET movie_details = ? WHERE info_hash = ?", 
+		string(updatedMovieDetailsBytes), infoHash)
 	return err
 }
 
@@ -236,9 +273,8 @@ func (s *TorrentStore) GetTorrent(infoHash string) (TorrentRecord, error) {
 
 	var record TorrentRecord
 	var addedAt sql.NullTime
-	var movieName sql.NullString
-	var year sql.NullInt64
-	var posterURL sql.NullString
+	var dataPath sql.NullString
+	var movieDetailsJSON sql.NullString
 
 	err := s.db.QueryRow(`
 		SELECT 
@@ -246,9 +282,8 @@ func (s *TorrentStore) GetTorrent(infoHash string) (TorrentRecord, error) {
 			name, 
 			magnet_uri, 
 			added_at,
-			movie_name, 
-			year, 
-			poster_url
+			data_path,
+			movie_details
 		FROM torrents
 		WHERE info_hash = ?
 	`, infoHash).Scan(
@@ -256,15 +291,11 @@ func (s *TorrentStore) GetTorrent(infoHash string) (TorrentRecord, error) {
 		&record.Name,
 		&record.MagnetURI,
 		&addedAt,
-		&movieName,
-		&year,
-		&posterURL,
+		&dataPath,
+		&movieDetailsJSON,
 	)
 
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return TorrentRecord{}, fmt.Errorf("torrent not found: %s", infoHash)
-		}
 		return TorrentRecord{}, err
 	}
 
@@ -275,17 +306,27 @@ func (s *TorrentStore) GetTorrent(infoHash string) (TorrentRecord, error) {
 		record.AddedAt = time.Now() // Default to current time if null
 	}
 
-	if movieName.Valid {
-		record.MovieName = movieName.String
+	if dataPath.Valid {
+		record.DataPath = dataPath.String
 	}
 
-	if year.Valid {
-		record.Year = int(year.Int64)
-	}
-
-	if posterURL.Valid {
-		record.PosterURL = posterURL.String
+	if movieDetailsJSON.Valid {
+		var movieDetails MovieDetails
+		if err := json.Unmarshal([]byte(movieDetailsJSON.String), &movieDetails); err != nil {
+			log.Printf("Error unmarshaling movie details for %s: %v", infoHash, err)
+		} else {
+			record.MovieDetails = &movieDetails
+		}
 	}
 
 	return record, nil
+}
+
+// UpdateDataPath updates the data path for a torrent
+func (s *TorrentStore) UpdateDataPath(infoHash string, dataPath string) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	_, err := s.db.Exec("UPDATE torrents SET data_path = ? WHERE info_hash = ?", dataPath, infoHash)
+	return err
 }

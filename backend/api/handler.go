@@ -2,23 +2,30 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/torrentplayer/backend/db"
 	"github.com/torrentplayer/backend/torrent"
 )
 
 // Handler handles API requests
 type Handler struct {
 	torrentClient *torrent.Client
+	torrentStore  *db.TorrentStore
 }
 
 // NewHandler creates a new API handler
-func NewHandler(torrentClient *torrent.Client) *Handler {
+func NewHandler(torrentClient *torrent.Client, torrentStore *db.TorrentStore) *Handler {
 	return &Handler{
 		torrentClient: torrentClient,
+		torrentStore:  torrentStore,
 	}
 }
 
@@ -56,6 +63,18 @@ func (h *Handler) AddMagnet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save the torrent to the database
+	record := db.TorrentRecord{
+		InfoHash:  info.InfoHash,
+		Name:      info.Name,
+		MagnetURI: req.MagnetURI,
+		AddedAt:   info.AddedAt,
+	}
+	
+	if err := h.torrentStore.SaveTorrent(record); err != nil {
+		log.Printf("Failed to save torrent to database: %v", err)
+	}
+
 	// Return the torrent info
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
@@ -78,8 +97,31 @@ func (h *Handler) ListTorrents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the list of torrents
+	// Get the list of torrents from the client
 	torrents := h.torrentClient.ListTorrents()
+
+	// For each torrent, check if we have saved movie details in the database
+	for i, torrent := range torrents {
+		record, err := h.torrentStore.GetTorrent(torrent.InfoHash)
+		if err != nil {
+			// If not found in DB, continue with the client's torrent info
+			continue
+		}
+
+		// If we have movie details saved, merge them with the torrent info
+		if record.MovieDetails != nil {
+			// Update the client-side torrent with our stored movie details
+			// We keep all the runtime info (progress, download status, etc.)
+			// but add movie details and files info from the database
+			movieDetails := record.MovieDetails
+			
+			// The client-side torrent already has files info in Files field
+			// so we don't need to overwrite it, we just keep the movie details
+			
+			// Add the movie details as a custom JSON field in the response
+			torrents[i].MovieDetails = movieDetails
+		}
+	}
 
 	// Return the torrents
 	w.Header().Set("Content-Type", "application/json")
@@ -120,6 +162,96 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	// Return the files
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(files)
+}
+
+// UpdateMovieDetails handles requests to update movie details for a torrent
+func (h *Handler) UpdateMovieDetails(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse the request body
+	var req struct {
+		InfoHash string          `json:"infoHash"`
+		Movie    *db.MovieDetails `json:"movie"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.InfoHash == "" || req.Movie == nil {
+		http.Error(w, "Missing infoHash or movie details", http.StatusBadRequest)
+		return
+	}
+
+	// Check if the torrent exists
+	t, ok := h.torrentClient.GetTorrent(req.InfoHash)
+	if !ok {
+		http.Error(w, "Torrent not found", http.StatusNotFound)
+		return
+	}
+
+	// Get files info from the torrent client
+	clientFiles, err := h.torrentClient.ListFiles(req.InfoHash)
+	if err != nil {
+		log.Printf("Failed to get files for torrent %s: %v", req.InfoHash, err)
+	} else {
+		// Convert torrent.FileInfo to db.FileInfo
+		var dbFiles []db.FileInfo
+		for _, f := range clientFiles {
+			dbFiles = append(dbFiles, db.FileInfo{
+				Path:       f.Path,
+				Length:     f.Length,
+				Progress:   f.Progress,
+				FileIndex:  f.FileIndex,
+				TorrentID:  f.TorrentID,
+				IsVideo:    f.IsVideo,
+				IsPlayable: f.IsPlayable,
+			})
+		}
+		// Add files to movie details
+		req.Movie.Files = dbFiles
+	}
+
+	// Get the torrent record from the database
+	record, err := h.torrentStore.GetTorrent(req.InfoHash)
+	if err != nil {
+		// If not found, create a new record
+		record = db.TorrentRecord{
+			InfoHash:  req.InfoHash,
+			Name:      t.Name(), // t.Name is a function
+			MagnetURI: "", // We don't have the magnet URI here
+			AddedAt:   time.Now(), // t doesn't have AddedAt field
+		}
+	}
+
+	// Update movie details
+	record.MovieDetails = req.Movie
+	record.DataPath = "data/" + record.Name // Set data path to the download location
+
+	// Save to database
+	if err := h.torrentStore.SaveTorrent(record); err != nil {
+		http.Error(w, "Failed to save movie details: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
 // StreamFile handles requests to stream a file from a torrent
@@ -199,57 +331,88 @@ func (h *Handler) StreamFile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Set partial content headers
-		w.Header().Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10)+"/"+strconv.FormatInt(file.Length(), 10))
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, file.Length()))
 		w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
 		w.WriteHeader(http.StatusPartialContent)
 	} else {
-		start = 0
-		end = file.Length() - 1
+		w.WriteHeader(http.StatusOK)
 	}
 
-	// Create a reader for the file
+	// Create reader
 	reader := file.NewReader()
+	if reader == nil {
+		http.Error(w, "Failed to create reader", http.StatusInternalServerError)
+		return
+	}
 	defer reader.Close()
 
-	// Seek to the start position
-	_, err = reader.Seek(start, io.SeekStart)
-	if err != nil {
-		http.Error(w, "Failed to seek: "+err.Error(), http.StatusInternalServerError)
-		return
+	// Seek to start position if needed
+	if start > 0 {
+		if _, err := reader.Seek(start, io.SeekStart); err != nil {
+			http.Error(w, "Failed to seek to position: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Stream the file
-	_, err = io.CopyN(w, reader, end-start+1)
-	if err != nil && err != io.EOF {
-		// Just log the error, the client might have disconnected
-		return
+	if end > 0 {
+		// Stream a range
+		_, err = io.CopyN(w, reader, end-start+1)
+	} else {
+		// Stream the whole file
+		_, err = io.Copy(w, reader)
+	}
+
+	if err != nil {
+		// Don't return an error, as the client may have disconnected
+		log.Printf("Error streaming file: %v", err)
 	}
 }
 
 // getContentTypeFromPath determines the content type of a file based on its path
 func getContentTypeFromPath(path string) string {
-	ext := strings.ToLower(path[strings.LastIndex(path, ".")+1:])
+	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
-	case "mp4":
+	case ".mp4", ".m4v", ".mov":
 		return "video/mp4"
-	case "webm":
-		return "video/webm"
-	case "mkv":
+	case ".mkv":
 		return "video/x-matroska"
-	case "avi":
+	case ".avi":
 		return "video/x-msvideo"
-	case "mov":
-		return "video/quicktime"
-	case "wmv":
+	case ".wmv":
 		return "video/x-ms-wmv"
-	case "flv":
+	case ".webm":
+		return "video/webm"
+	case ".flv":
 		return "video/x-flv"
-	case "m4v":
-		return "video/x-m4v"
-	case "mpg", "mpeg":
-		return "video/mpeg"
-	case "3gp":
-		return "video/3gpp"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".flac":
+		return "audio/flac"
+	case ".ogg":
+		return "audio/ogg"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".srt":
+		return "application/x-subrip"
+	case ".vtt":
+		return "text/vtt"
+	case ".txt":
+		return "text/plain"
+	case ".pdf":
+		return "application/pdf"
+	case ".zip":
+		return "application/zip"
+	case ".rar":
+		return "application/x-rar-compressed"
 	default:
 		return "application/octet-stream"
 	}
