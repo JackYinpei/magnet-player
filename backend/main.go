@@ -39,6 +39,24 @@ func main() {
 	}
 	defer torrentStore.Close()
 
+	// 从数据库恢复种子到torrent client
+	log.Println("正在从数据库恢复种子...")
+	torrents, err := torrentStore.GetAllTorrents()
+	if err != nil {
+		log.Printf("从数据库获取种子失败: %v", err)
+	} else {
+		for _, t := range torrents {
+			if t.MagnetURI != "" {
+				log.Printf("正在恢复种子: %s", t.Name)
+				_, err := torrentClient.AddMagnet(t.MagnetURI)
+				if err != nil {
+					log.Printf("恢复种子失败 %s: %v", t.InfoHash, err)
+				}
+			}
+		}
+		log.Printf("已从数据库恢复 %d 个种子", len(torrents))
+	}
+
 	// Setup API handlers
 	apiHandler := api.NewHandler(torrentClient, torrentStore)
 
@@ -48,8 +66,10 @@ func main() {
 	http.HandleFunc("/magnet/api/files", apiHandler.ListFiles)
 	http.HandleFunc("/magnet/stream/", apiHandler.StreamFile)
 	http.HandleFunc("/magnet/search", searchhandle.SearchMovieHandler)
-	// Add new endpoint for updating movie details
-	http.HandleFunc("/magnet/api/movie-details", apiHandler.UpdateMovieDetails)
+	// Add new endpoints
+	http.HandleFunc("/magnet/api/get-movie-details", apiHandler.GetMovieDetails)
+	http.HandleFunc("/magnet/api/search", apiHandler.SearchMovie)
+	http.HandleFunc("/magnet/api/torrents/movie-details/", apiHandler.UpdateMovieDetails)
 
 	// Enable CORS
 	http.HandleFunc("/magnet/", func(w http.ResponseWriter, r *http.Request) {

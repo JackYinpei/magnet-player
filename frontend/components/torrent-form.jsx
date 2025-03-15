@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { addMagnet } from '@/lib/api';
+import { addMagnet, saveMovieDetails } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -37,6 +37,11 @@ export function TorrentForm({ onTorrentAdded }) {
     try {
       setLoading(true);
       const newTorrent = await addMagnet(magnetUri);
+      console.log("新增的：",newTorrent);
+      
+      
+      // 这一步可以先保存magnet 的基本信息
+      // await saveMovieDetails(newTorrent.InfoHash, newTorrent.MovieDetails);
       
       // 重置表单
       setMagnetUri('');

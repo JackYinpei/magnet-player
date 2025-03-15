@@ -1,241 +1,138 @@
+'use client'
+import { getMovieDetails, getMovieInfo, saveMovieDetails } from '@/lib/api';
 import { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { PlayIcon, FolderIcon } from 'lucide-react';
+import { TorrentCard } from './torrent-card';
+import { Button } from './ui/button';
 import Image from 'next/image';
-import { FileList } from './file-list';
-import { Progress } from "@/components/ui/progress";
 import { formatFileSize, formatProgress } from '@/lib/utils';
-import { Skeleton } from '@/components/ui/skeleton';
-import * as api from '@/lib/api';
-import { useInterval } from '@/lib/hooks';
+import { Calendar, Clock, Film, Star, Users } from 'lucide-react';
 
-export function TorrentList() {
-  const [torrents, setTorrents] = useState([]);
-  const [selectedTorrent, setSelectedTorrent] = useState(null);
-  const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [filesLoading, setFilesLoading] = useState(false);
-
-  // Fetch torrents list on component mount
-  useEffect(() => {
-    fetchTorrents();
-  }, []);
-
-  // Poll for updates every 3 seconds
-  useInterval(() => {
-    fetchTorrents();
-  }, 3000);
-
-  const fetchTorrents = async () => {
+const MovieCard = ({ movie: initialMovie }) => {
+  const [movie, setMovie] = useState(initialMovie);
+  
+  const handleGetDetails = async () => {
     try {
-      const data = await api.listTorrents();
-      setTorrents(data);
+      const details = await getMovieInfo(movie.name);
+      setMovie({ ...movie, MovieDetails: details });
+      await saveMovieDetails(movie.InfoHash, details)
     } catch (error) {
-      console.error("Failed to fetch torrents:", error);
+      console.error("Failed to fetch movie details:", error);
     }
-  };
-
-  const fetchMovieInfo = async (torrent) => {
-    if (!torrent.name) return;
-    
-    try {
-      setLoading(true);
-      
-      // Check if movie details already exist
-      if (torrent.movieDetails) {
-        setSelectedTorrent({ ...torrent });
-        setLoading(false);
-        return;
-      }
-      
-      // Get movie info from API
-      const movieInfo = await api.getMovieInfo(torrent.name);
-      
-      if (movieInfo && movieInfo.Title) {
-        // Create movie details object
-        const movieDetails = {
-          title: movieInfo.Title,
-          year: movieInfo.Year,
-          poster: movieInfo.Poster,
-          plot: movieInfo.Plot,
-          genre: movieInfo.Genre,
-          director: movieInfo.Director,
-          actors: movieInfo.Actors,
-          imdbRating: movieInfo.imdbRating,
-          files: [] // Will be populated by the backend
-        };
-        
-        // Update local state
-        const updatedTorrent = { ...torrent, movieDetails };
-        setSelectedTorrent(updatedTorrent);
-        
-        // Save movie details to server
-        await api.saveMovieDetails(torrent.infoHash, movieDetails);
-        
-        // Update torrents list to show the movie details
-        setTorrents(torrents.map(t => 
-          t.infoHash === torrent.infoHash ? updatedTorrent : t
-        ));
-      } else {
-        setSelectedTorrent(torrent);
-      }
-    } catch (error) {
-      console.error('Error fetching movie info:', error);
-      setSelectedTorrent(torrent);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchFiles = async (torrent) => {
-    try {
-      setFilesLoading(true);
-      const data = await api.listFiles(torrent.infoHash);
-      setFiles(data);
-    } catch (error) {
-      console.error("Failed to fetch files:", error);
-    } finally {
-      setFilesLoading(false);
-    }
-  };
-
-  const handleTorrentSelect = async (torrent) => {
-    await fetchMovieInfo(torrent);
-    await fetchFiles(torrent);
   };
 
   return (
-    <div className="grid gap-4">
-      <h2 className="text-2xl font-bold mb-4">My Torrents</h2>
-
-      {torrents.length === 0 ? (
-        <div className="text-center p-8">
-          <p className="text-muted-foreground">No torrents added yet. Add a magnet link to get started.</p>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {torrents.map((torrent) => (
-            <Card key={torrent.infoHash} className="overflow-hidden">
-              <CardHeader className="pb-2">
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <CardTitle className="text-xl truncate">
-                      {torrent.movieDetails ? 
-                        `${torrent.movieDetails.title}${torrent.movieDetails.year ? ` (${torrent.movieDetails.year})` : ''}` 
-                        : torrent.name}
-                    </CardTitle>
-                    {torrent.movieDetails && torrent.movieDetails.genre && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        <Badge variant="outline" className="text-xs">
-                          {torrent.movieDetails.genre}
-                        </Badge>
-                        {torrent.movieDetails.imdbRating && (
-                          <Badge variant="secondary" className="ml-2">
-                            ⭐ {torrent.movieDetails.imdbRating}
-                          </Badge>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent>
-                {torrent.movieDetails && torrent.movieDetails.poster && (
-                  <div className="flex gap-4 mb-4">
-                    <div className="relative w-24 h-36 shrink-0 overflow-hidden rounded">
-                      <Image 
-                        src={torrent.movieDetails.poster} 
-                        alt={torrent.movieDetails.title || torrent.name}
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 768px) 100px, 150px"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      {torrent.movieDetails.plot && (
-                        <div className="mb-2">
-                          <h4 className="text-sm font-medium mb-1">简介:</h4>
-                          <p className="text-sm text-muted-foreground">
-                            {isExpanded ? torrent.movieDetails.plot : `${torrent.movieDetails.plot.substring(0, 100)}...`}
-                            {torrent.movieDetails.plot.length > 100 && (
-                              <Button 
-                                variant="link" 
-                                className="p-0 h-auto text-xs ml-1" 
-                                onClick={() => setIsExpanded(!isExpanded)}
-                              >
-                                {isExpanded ? "收起" : "展开"}
-                              </Button>
-                            )}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+    <div className="flex flex-col md:flex-row overflow-hidden bg-card border rounded-lg shadow-lg mb-6 hover:shadow-xl transition-shadow duration-300">
+      {/* Movie Poster */}
+      <div className="relative w-full md:w-64 h-80 flex-shrink-0">
+        {movie?.MovieDetails?.posterUrl ? (
+          <img 
+            src={movie.MovieDetails.posterUrl} 
+            alt={movie.MovieDetails.originalTitle || movie.name}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-muted">
+            <Film size={48} className="text-muted-foreground" />
+            <span className="text-muted-foreground">No Poster</span>
+          </div>
+        )}
+      </div>
+      
+      {/* Movie Info */}
+      <div className="flex-1 p-4">
+        <div className="flex flex-col h-full">
+          {/* Title and Rating */}
+          <div className="flex justify-between items-start mb-2">
+            <h2 className="text-2xl font-bold text-foreground">
+              {movie?.MovieDetails?.originalTitle || movie.name}
+            </h2>
+            {movie?.MovieDetails?.rating && (
+              <div className="flex items-center text-yellow-500">
+                <Star className="fill-yellow-500 mr-1" size={18} />
+                <span>{movie.MovieDetails.rating}</span>
+                {movie.MovieDetails.voteCount && (
+                  <span className="text-sm text-muted-foreground ml-1">({movie.MovieDetails.voteCount})</span>
                 )}
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>进度:</span>
-                    <span>{formatProgress(torrent.progress)}</span>
-                  </div>
-                  <Progress value={torrent.progress * 100} className="h-2" />
-
-                  <div className="grid grid-cols-2 gap-2 text-sm mt-2">
-                    <div className="flex flex-col">
-                      <span className="text-muted-foreground">大小:</span>
-                      <span>{formatFileSize(torrent.length)}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-muted-foreground">已下载:</span>
-                      <span>{formatFileSize(torrent.downloaded)}</span>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-
-              <CardFooter className="flex gap-2 pt-2">
-                <Button 
-                  variant="default" 
-                  size="sm" 
-                  onClick={() => handleTorrentSelect(torrent)}
-                  className="w-full"
-                >
-                  <FolderIcon className="mr-2 h-4 w-4" />
-                  浏览文件
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {selectedTorrent && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>
-              {selectedTorrent.movieDetails?.title || selectedTorrent.name}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {filesLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-6 w-full" />
-                <Skeleton className="h-6 w-full" />
-                <Skeleton className="h-6 w-full" />
               </div>
-            ) : (
-              <FileList 
-                files={files} 
-                infoHash={selectedTorrent.infoHash} 
-              />
             )}
-          </CardContent>
-        </Card>
-      )}
+          </div>
+          
+          {/* Release Year and Runtime */}
+          {movie?.MovieDetails && (
+            <div className="flex flex-wrap gap-3 text-sm text-muted-foreground mb-3">
+              {movie.MovieDetails.releaseDate && (
+                <div className="flex items-center">
+                  <Calendar size={16} className="mr-1" />
+                  <span>{new Date(movie.MovieDetails.releaseDate).getFullYear()}</span>
+                </div>
+              )}
+              {movie.MovieDetails.runtime && (
+                <div className="flex items-center">
+                  <Clock size={16} className="mr-1" />
+                  <span>{movie.MovieDetails.runtime} min</span>
+                </div>
+              )}
+              {movie.MovieDetails.status && (
+                <div className="px-2 py-0.5 bg-primary/10 text-primary rounded-full">
+                  {movie.MovieDetails.status}
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Genres */}
+          {movie?.MovieDetails?.genres && movie.MovieDetails.genres.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {movie.MovieDetails.genres.map((genre, index) => (
+                <span key={index} className="px-2 py-1 bg-secondary text-secondary-foreground rounded-md text-xs">
+                  {genre}
+                </span>
+              ))}
+            </div>
+          )}
+          
+          {/* Overview */}
+          <p className="text-sm text-card-foreground mb-4 flex-grow">
+            {movie?.MovieDetails?.overview || movie.description || "No description available."}
+          </p>
+          
+          {/* Filename info (if available) */}
+          {movie?.MovieDetails?.filename && (
+            <div className="text-xs text-muted-foreground mb-3 truncate">
+              <span className="font-semibold">Filename:</span> {movie.MovieDetails.filename}
+            </div>
+          )}
+          
+          {/* Get Details Button */}
+          {!movie?.MovieDetails && (
+            <div className="mt-auto">
+              <Button onClick={handleGetDetails} variant="outline" className="w-full">
+                获取详情
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
+};
+
+export function TorrentList() {
+  const [movies, setMovies] = useState([]);
+  useEffect(() => {
+    getMovieDetails().then((details) => {
+      setMovies(details);
+      console.log(details);
+    });
+  }, []);
+  return (
+    <div className="container mx-auto py-6 px-4">
+      <h1 className="text-3xl font-bold mb-6">影片列表</h1>
+      <div className="grid grid-cols-1 gap-6">
+        {movies.map((movie, i) => (
+          <MovieCard key={i} movie={movie} />
+        ))}
+      </div>
+    </div>
+  )
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -181,35 +182,39 @@ func (h *Handler) UpdateMovieDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse the request body
-	var req struct {
-		InfoHash string          `json:"infoHash"`
-		Movie    *db.MovieDetails `json:"movie"`
+	// 从URL路径中提取infoHash
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		http.Error(w, "Invalid URL path", http.StatusBadRequest)
+		return
+	}
+	infoHash := pathParts[len(pathParts)-1]
+	
+	if infoHash == "" {
+		http.Error(w, "Missing infoHash", http.StatusBadRequest)
+		return
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// 解析请求体中的电影详情
+	var movieDetails db.MovieDetails
+	if err := json.NewDecoder(r.Body).Decode(&movieDetails); err != nil {
 		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if req.InfoHash == "" || req.Movie == nil {
-		http.Error(w, "Missing infoHash or movie details", http.StatusBadRequest)
-		return
-	}
-
-	// Check if the torrent exists
-	t, ok := h.torrentClient.GetTorrent(req.InfoHash)
+	// 检查种子是否存在
+	t, ok := h.torrentClient.GetTorrent(infoHash)
 	if !ok {
 		http.Error(w, "Torrent not found", http.StatusNotFound)
 		return
 	}
 
-	// Get files info from the torrent client
-	clientFiles, err := h.torrentClient.ListFiles(req.InfoHash)
+	// 从种子客户端获取文件信息
+	clientFiles, err := h.torrentClient.ListFiles(infoHash)
 	if err != nil {
-		log.Printf("Failed to get files for torrent %s: %v", req.InfoHash, err)
+		log.Printf("Failed to get files for torrent %s: %v", infoHash, err)
 	} else {
-		// Convert torrent.FileInfo to db.FileInfo
+		// 转换 torrent.FileInfo 到 db.FileInfo
 		var dbFiles []db.FileInfo
 		for _, f := range clientFiles {
 			dbFiles = append(dbFiles, db.FileInfo{
@@ -222,36 +227,38 @@ func (h *Handler) UpdateMovieDetails(w http.ResponseWriter, r *http.Request) {
 				IsPlayable: f.IsPlayable,
 			})
 		}
-		// Add files to movie details
-		req.Movie.Files = dbFiles
+		
+		// 添加文件信息到电影详情
+		movieDetails.Files = dbFiles
 	}
 
-	// Get the torrent record from the database
-	record, err := h.torrentStore.GetTorrent(req.InfoHash)
+	// 获取种子记录
+	record, err := h.torrentStore.GetTorrent(infoHash)
 	if err != nil {
-		// If not found, create a new record
+		log.Printf("Torrent not found in database, creating new record: %v", err)
 		record = db.TorrentRecord{
-			InfoHash:  req.InfoHash,
-			Name:      t.Name(), // t.Name is a function
-			MagnetURI: "", // We don't have the magnet URI here
-			AddedAt:   time.Now(), // t doesn't have AddedAt field
+			InfoHash:  infoHash,
+			Name:      t.Name(), // t.Name 是函数，需要调用它
+			MagnetURI: "", // 客户端对象中没有此字段，设置为空
+			AddedAt:   time.Now(), // 客户端对象中没有此字段，设置为当前时间
 		}
 	}
 
-	// Update movie details
-	record.MovieDetails = req.Movie
-	record.DataPath = "data/" + record.Name // Set data path to the download location
+	// 更新电影详情
+	record.MovieDetails = &movieDetails
 
-	// Save to database
+	// 保存到数据库
 	if err := h.torrentStore.SaveTorrent(record); err != nil {
 		http.Error(w, "Failed to save movie details: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Return success
+	// 返回成功响应
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Movie details saved successfully",
+	})
 }
 
 // StreamFile handles requests to stream a file from a torrent
@@ -416,4 +423,132 @@ func getContentTypeFromPath(path string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// GetMovieDetails handles requests to get movie details for all torrents
+func (h *Handler) GetMovieDetails(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get all torrents from the database with their movie details
+	records, err := h.torrentStore.GetAllTorrents()
+	if err != nil {
+		http.Error(w, "Failed to get movie details: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Extract only the necessary movie information for the UI
+	type MovieInfo struct {
+		InfoHash     string          `json:"infoHash"`
+		Name         string          `json:"name"`
+		AddedAt      time.Time       `json:"addedAt"`
+		MovieDetails *db.MovieDetails `json:"movieDetails,omitempty"`
+	}
+
+	movieInfoList := make([]MovieInfo, 0, len(records))
+	for _, record := range records {
+		movieInfo := MovieInfo{
+			InfoHash:     record.InfoHash,
+			Name:         record.Name,
+			AddedAt:      record.AddedAt,
+			MovieDetails: record.MovieDetails,
+		}
+		movieInfoList = append(movieInfoList, movieInfo)
+	}
+
+	// Return the movie details
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(movieInfoList)
+}
+
+// SearchMovie handles requests to search for a movie by name
+func (h *Handler) SearchMovie(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get the filename from the URL query
+	filename := r.URL.Query().Get("filename")
+	if filename == "" {
+		http.Error(w, "Missing filename parameter", http.StatusBadRequest)
+		return
+	}
+
+	// TODO: Implement actual movie info lookup from an external API
+	// For now, we'll return a mock response with basic movie details based on the filename
+	
+	// Extract the movie name and year from the filename using basic parsing
+	// This is a simple implementation and might not work for all filenames
+	name := filename
+	year := ""
+	
+	// Try to extract year in format (YYYY) or .YYYY.
+	yearPattern1 := strings.LastIndex(name, "(")
+	yearPattern2 := strings.LastIndex(name, ".")
+	
+	if yearPattern1 != -1 && yearPattern1+5 <= len(name) && name[yearPattern1+1] >= '1' && name[yearPattern1+1] <= '2' {
+		// Extract year from (YYYY) format
+		yearStr := name[yearPattern1+1 : yearPattern1+5]
+		if _, err := strconv.Atoi(yearStr); err == nil {
+			year = yearStr
+			name = strings.TrimSpace(name[:yearPattern1])
+		}
+	} else if yearPattern2 != -1 && yearPattern2+5 <= len(name) && name[yearPattern2+1] >= '1' && name[yearPattern2+1] <= '2' {
+		// Extract year from .YYYY. format
+		yearStr := name[yearPattern2+1 : yearPattern2+5]
+		if _, err := strconv.Atoi(yearStr); err == nil {
+			year = yearStr
+			name = strings.TrimSpace(name[:yearPattern2])
+		}
+	}
+	
+	// Clean up the name by removing common suffixes and file extensions
+	name = strings.TrimSuffix(name, ".mp4")
+	name = strings.TrimSuffix(name, ".mkv")
+	name = strings.TrimSuffix(name, ".avi")
+	
+	// Create a mock movie info response
+	movieInfo := map[string]interface{}{
+		"filename":     name,
+		"year":         year,
+		"posterUrl":    "https://via.placeholder.com/300x450?text=" + url.QueryEscape(name),
+		"backdropUrl":  "https://via.placeholder.com/1280x720?text=" + url.QueryEscape(name),
+		"overview":     "这是关于 " + name + " 的电影简介。",
+		"rating":       5.0,
+		"voteCount":    10,
+		"genres":       []string{"未知"},
+		"runtime":      90,
+		"tmdbId":       0,
+		"releaseDate":  time.Now().Format("2006-01-02"),
+		"originalTitle": name,
+		"popularity":   1.0,
+		"status":       "Released",
+	}
+
+	// Return the movie info
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(movieInfo)
 }
