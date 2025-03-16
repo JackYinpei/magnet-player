@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -99,92 +98,100 @@ func (s *TorrentStore) Close() error {
 	return s.db.Close()
 }
 
-// serializeToJSON serializes a struct to JSON or returns an empty string if nil
-func serializeToJSON(v interface{}) (sql.NullString, error) {
-	if v == nil {
-		return sql.NullString{Valid: false}, nil
-	}
-	
-	bytes, err := json.Marshal(v)
-	if err != nil {
-		return sql.NullString{Valid: false}, fmt.Errorf("failed to marshal to JSON: %w", err)
-	}
-	
-	return sql.NullString{
-		String: string(bytes),
-		Valid:  true,
-	}, nil
-}
-
-// SaveTorrent saves a torrent to the database
-func (s *TorrentStore) SaveTorrent(record *TorrentRecord) error {
+// AddTorrent adds a new torrent record to the database
+func (s *TorrentStore) AddTorrent(record *TorrentRecord) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	// 序列化 MovieDetails 为 JSON
-	movieDetailsJSON, err := serializeToJSON(record.MovieDetails)
-	if err != nil {
-		return fmt.Errorf("failed to serialize movie details: %w", err)
-	}
-
-	// 序列化 Files 为 JSON
-	filesJSON, err := serializeToJSON(record.Files)
-	if err != nil {
-		return fmt.Errorf("failed to serialize files: %w", err)
-	}
-
-	// 使用事务保证操作的原子性
-	tx, err := s.db.Begin()
+	// Convert Files slice to JSON
+	filesJSON, err := json.Marshal(record.Files)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		}
-	}()
 
-	// 插入或更新记录
-	_, err = tx.Exec(`
+	// Convert MovieDetails to JSON if it exists
+	var movieDetailsJSON []byte
+	if record.MovieDetails != nil {
+		movieDetailsJSON, err = json.Marshal(record.MovieDetails)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Insert the torrent record
+	_, err = s.db.Exec(`
 		INSERT INTO torrents (
 			info_hash, name, magnet_uri, added_at, data_path, 
 			length, files, downloaded, progress, state, movie_details
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(info_hash) DO UPDATE SET
-			name = ?,
-			magnet_uri = ?,
-			added_at = ?,
-			data_path = ?,
-			length = ?,
-			files = ?,
-			downloaded = ?,
-			progress = ?,
-			state = ?,
-			movie_details = ?
 	`,
-		// INSERT 值
 		record.InfoHash, record.Name, record.MagnetURI, record.AddedAt, record.DataPath,
-		record.Length, filesJSON, record.Downloaded, record.Progress, record.State, movieDetailsJSON,
-		// UPDATE 值
-		record.Name, record.MagnetURI, record.AddedAt, record.DataPath,
-		record.Length, filesJSON, record.Downloaded, record.Progress, record.State, movieDetailsJSON)
-
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+		record.Length, string(filesJSON), record.Downloaded, record.Progress, record.State,
+		string(movieDetailsJSON),
+	)
+	return err
 }
 
-// GetAllTorrents retrieves all torrents from the database
+// GetTorrent retrieves a torrent record by its info hash
+func (s *TorrentStore) GetTorrent(infoHash string) (*TorrentRecord, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	var record TorrentRecord
+	var filesJSON, movieDetailsJSON string
+	var addedAt string
+
+	err := s.db.QueryRow(`
+		SELECT info_hash, name, magnet_uri, added_at, data_path, 
+		       length, files, downloaded, progress, state, movie_details
+		FROM torrents WHERE info_hash = ?
+	`, infoHash).Scan(
+		&record.InfoHash, &record.Name, &record.MagnetURI, &addedAt, &record.DataPath,
+		&record.Length, &filesJSON, &record.Downloaded, &record.Progress, &record.State,
+		&movieDetailsJSON,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Return nil, nil when no record is found
+		}
+		return nil, err
+	}
+
+	// Parse added_at time
+	record.AddedAt, err = time.Parse(time.RFC3339, addedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal files JSON
+	if filesJSON != "" {
+		err = json.Unmarshal([]byte(filesJSON), &record.Files)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Unmarshal movie details JSON if it exists
+	if movieDetailsJSON != "" {
+		record.MovieDetails = &MovieDetails{}
+		err = json.Unmarshal([]byte(movieDetailsJSON), record.MovieDetails)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &record, nil
+}
+
+// GetAllTorrents retrieves all torrent records from the database
 func (s *TorrentStore) GetAllTorrents() ([]*TorrentRecord, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	rows, err := s.db.Query(`
-		SELECT 
-			info_hash, name, magnet_uri, added_at, data_path, 
-			length, files, downloaded, progress, state, movie_details
+		SELECT info_hash, name, magnet_uri, added_at, data_path, 
+		       length, files, downloaded, progress, state, movie_details
 		FROM torrents
 	`)
 	if err != nil {
@@ -193,75 +200,45 @@ func (s *TorrentStore) GetAllTorrents() ([]*TorrentRecord, error) {
 	defer rows.Close()
 
 	var torrents []*TorrentRecord
+
 	for rows.Next() {
-		var (
-			record           = &TorrentRecord{}
-			addedAt          sql.NullTime
-			dataPath         sql.NullString
-			length           sql.NullInt64
-			filesJSON        sql.NullString
-			downloaded       sql.NullInt64
-			progress         sql.NullFloat64
-			state            sql.NullString
-			movieDetailsJSON sql.NullString
-		)
+		var record TorrentRecord
+		var filesJSON, movieDetailsJSON string
+		var addedAt string
 
 		err := rows.Scan(
-			&record.InfoHash, &record.Name, &record.MagnetURI, &addedAt, &dataPath,
-			&length, &filesJSON, &downloaded, &progress, &state, &movieDetailsJSON,
+			&record.InfoHash, &record.Name, &record.MagnetURI, &addedAt, &record.DataPath,
+			&record.Length, &filesJSON, &record.Downloaded, &record.Progress, &record.State,
+			&movieDetailsJSON,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		// 处理可能为 NULL 的字段
-		if addedAt.Valid {
-			record.AddedAt = addedAt.Time
-		} else {
-			record.AddedAt = time.Now()
+		// Parse added_at time
+		record.AddedAt, err = time.Parse(time.RFC3339, addedAt)
+		if err != nil {
+			return nil, err
 		}
 
-		if dataPath.Valid {
-			record.DataPath = dataPath.String
-		}
-
-		if length.Valid {
-			record.Length = length.Int64
-		}
-
-		if downloaded.Valid {
-			record.Downloaded = downloaded.Int64
-		}
-
-		if progress.Valid {
-			record.Progress = float32(progress.Float64)
-		}
-
-		if state.Valid {
-			record.State = state.String
-		}
-
-		// 解析文件信息的 JSON
-		if filesJSON.Valid && filesJSON.String != "" {
-			var files []FileInfo
-			if err := json.Unmarshal([]byte(filesJSON.String), &files); err != nil {
-				log.Printf("警告: 解析种子 %s 的文件信息失败: %v", record.InfoHash, err)
-			} else {
-				record.Files = files
+		// Unmarshal files JSON
+		if filesJSON != "" {
+			err = json.Unmarshal([]byte(filesJSON), &record.Files)
+			if err != nil {
+				return nil, err
 			}
 		}
 
-		// 解析电影详情的 JSON
-		if movieDetailsJSON.Valid && movieDetailsJSON.String != "" {
-			var movieDetails MovieDetails
-			if err := json.Unmarshal([]byte(movieDetailsJSON.String), &movieDetails); err != nil {
-				log.Printf("警告: 解析种子 %s 的电影详情失败: %v", record.InfoHash, err)
-			} else {
-				record.MovieDetails = &movieDetails
+		// Unmarshal movie details JSON if it exists
+		if movieDetailsJSON != "" {
+			record.MovieDetails = &MovieDetails{}
+			err = json.Unmarshal([]byte(movieDetailsJSON), record.MovieDetails)
+			if err != nil {
+				return nil, err
 			}
 		}
 
-		torrents = append(torrents, record)
+		torrents = append(torrents, &record)
 	}
 
 	if err = rows.Err(); err != nil {
@@ -271,112 +248,70 @@ func (s *TorrentStore) GetAllTorrents() ([]*TorrentRecord, error) {
 	return torrents, nil
 }
 
-// DeleteTorrent removes a torrent from the database
+// UpdateTorrent updates an existing torrent record in the database
+func (s *TorrentStore) UpdateTorrent(record *TorrentRecord) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Check if the torrent exists
+	var exists bool
+	err := s.db.QueryRow("SELECT 1 FROM torrents WHERE info_hash = ?", record.InfoHash).Scan(&exists)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("torrent with info_hash %s does not exist", record.InfoHash)
+		}
+		return err
+	}
+
+	// Convert Files slice to JSON
+	filesJSON, err := json.Marshal(record.Files)
+	if err != nil {
+		return err
+	}
+
+	// Convert MovieDetails to JSON if it exists
+	var movieDetailsJSON []byte
+	if record.MovieDetails != nil {
+		movieDetailsJSON, err = json.Marshal(record.MovieDetails)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Update the torrent record
+	_, err = s.db.Exec(`
+		UPDATE torrents 
+		SET name = ?, magnet_uri = ?, added_at = ?, data_path = ?, 
+		    length = ?, files = ?, downloaded = ?, progress = ?, state = ?, movie_details = ?
+		WHERE info_hash = ?
+	`,
+		record.Name, record.MagnetURI, record.AddedAt, record.DataPath,
+		record.Length, string(filesJSON), record.Downloaded, record.Progress, record.State,
+		string(movieDetailsJSON), record.InfoHash,
+	)
+	return err
+}
+
+// DeleteTorrent removes a torrent record from the database
 func (s *TorrentStore) DeleteTorrent(infoHash string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	_, err := s.db.Exec("DELETE FROM torrents WHERE info_hash = ?", infoHash)
-	return err
-}
-
-// UpdateMovieInfo updates the movie information for a torrent
-func (s *TorrentStore) UpdateMovieInfo(infoHash string, movieDetails *MovieDetails) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	if movieDetails == nil {
-		return fmt.Errorf("movie details cannot be nil")
-	}
-
-	movieDetailsJSON, err := serializeToJSON(movieDetails)
+	// Delete the torrent record
+	result, err := s.db.Exec("DELETE FROM torrents WHERE info_hash = ?", infoHash)
 	if err != nil {
-		return fmt.Errorf("failed to serialize movie details: %w", err)
+		return err
 	}
 
-	_, err = s.db.Exec("UPDATE torrents SET movie_details = ? WHERE info_hash = ?",
-		movieDetailsJSON, infoHash)
-	return err
-}
-
-// GetTorrent retrieves a single torrent by its info hash
-func (s *TorrentStore) GetTorrent(infoHash string) (*TorrentRecord, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	var (
-		record           = &TorrentRecord{}
-		addedAt          sql.NullTime
-		dataPath         sql.NullString
-		length           sql.NullInt64
-		filesJSON        sql.NullString
-		downloaded       sql.NullInt64
-		progress         sql.NullFloat64
-		state            sql.NullString
-		movieDetailsJSON sql.NullString
-	)
-
-	err := s.db.QueryRow(`
-		SELECT 
-			info_hash, name, magnet_uri, added_at, data_path, 
-			length, files, downloaded, progress, state, movie_details
-		FROM torrents
-		WHERE info_hash = ?
-	`, infoHash).Scan(
-		&record.InfoHash, &record.Name, &record.MagnetURI, &addedAt, &dataPath,
-		&length, &filesJSON, &downloaded, &progress, &state, &movieDetailsJSON,
-	)
-
+	// Check if any row was affected
+	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// 处理可能为 NULL 的字段
-	if addedAt.Valid {
-		record.AddedAt = addedAt.Time
-	} else {
-		record.AddedAt = time.Now()
+	if rowsAffected == 0 {
+		return fmt.Errorf("torrent with info_hash %s does not exist", infoHash)
 	}
 
-	if dataPath.Valid {
-		record.DataPath = dataPath.String
-	}
-
-	if length.Valid {
-		record.Length = length.Int64
-	}
-
-	if downloaded.Valid {
-		record.Downloaded = downloaded.Int64
-	}
-
-	if progress.Valid {
-		record.Progress = float32(progress.Float64)
-	}
-
-	if state.Valid {
-		record.State = state.String
-	}
-
-	// 解析文件信息的 JSON
-	if filesJSON.Valid && filesJSON.String != "" {
-		var files []FileInfo
-		if err := json.Unmarshal([]byte(filesJSON.String), &files); err != nil {
-			log.Printf("警告: 解析种子 %s 的文件信息失败: %v", infoHash, err)
-		} else {
-			record.Files = files
-		}
-	}
-
-	// 解析电影详情的 JSON
-	if movieDetailsJSON.Valid && movieDetailsJSON.String != "" {
-		var movieDetails MovieDetails
-		if err := json.Unmarshal([]byte(movieDetailsJSON.String), &movieDetails); err != nil {
-			log.Printf("警告: 解析种子 %s 的电影详情失败: %v", infoHash, err)
-		} else {
-			record.MovieDetails = &movieDetails
-		}
-	}
-
-	return record, nil
+	return nil
 }

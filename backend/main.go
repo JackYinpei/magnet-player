@@ -63,7 +63,6 @@ func main() {
 	// Configure HTTP server
 	http.HandleFunc("/magnet/api/magnet", apiHandler.AddMagnet)
 	http.HandleFunc("/magnet/api/torrents", apiHandler.ListTorrents)
-	http.HandleFunc("/magnet/api/files", apiHandler.ListFiles)
 	http.HandleFunc("/magnet/stream/", apiHandler.StreamFile)
 	http.HandleFunc("/magnet/search", searchhandle.SearchMovieHandler)
 	// Add new endpoints

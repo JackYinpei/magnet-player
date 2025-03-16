@@ -72,7 +72,7 @@ func (h *Handler) AddMagnet(w http.ResponseWriter, r *http.Request) {
 		AddedAt:   info.AddedAt,
 	}
 
-	if err := h.torrentStore.SaveTorrent(&record); err != nil {
+	if err := h.torrentStore.AddTorrent(&record); err != nil {
 		log.Printf("Failed to save torrent to database: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func (h *Handler) AddMagnet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(info)
 }
 
-// ListTorrents handles requests to list all torrents
+// ListTorrents handles requests to list all torrents, just torrent client status
 func (h *Handler) ListTorrents(w http.ResponseWriter, r *http.Request) {
 	// Set CORS headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -100,69 +100,9 @@ func (h *Handler) ListTorrents(w http.ResponseWriter, r *http.Request) {
 
 	// Get the list of torrents from the client
 	torrents := h.torrentClient.ListTorrents()
-
-	// For each torrent, check if we have saved movie details in the database
-	for i, torrent := range torrents {
-		record, err := h.torrentStore.GetTorrent(torrent.InfoHash)
-		if err != nil {
-			// If not found in DB, continue with the client's torrent info
-			continue
-		}
-
-		// If we have movie details saved, merge them with the torrent info
-		if record.MovieDetails != nil {
-			// Update the client-side torrent with our stored movie details
-			// We keep all the runtime info (progress, download status, etc.)
-			// but add movie details and files info from the database
-			movieDetails := record.MovieDetails
-
-			// The client-side torrent already has files info in Files field
-			// so we don't need to overwrite it, we just keep the movie details
-
-			// Add the movie details as a custom JSON field in the response
-			torrents[i].MovieDetails = movieDetails
-		}
-	}
-
 	// Return the torrents
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(torrents)
-}
-
-// ListFiles handles requests to list all files in a torrent
-func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
-	// Set CORS headers
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Get the info hash from the URL query
-	infoHash := r.URL.Query().Get("infoHash")
-	if infoHash == "" {
-		http.Error(w, "Missing infoHash parameter", http.StatusBadRequest)
-		return
-	}
-
-	// Get the list of files
-	files, err := h.torrentClient.ListFiles(infoHash)
-	if err != nil {
-		http.Error(w, "Failed to list files: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Return the files
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(files)
 }
 
 // UpdateMovieDetails handles requests to update movie details for a torrent
@@ -207,31 +147,31 @@ func (h *Handler) UpdateMovieDetails(w http.ResponseWriter, r *http.Request) {
 	record, err := h.torrentStore.GetTorrent(infoHash)
 	if err != nil {
 		log.Printf("Torrent not found in database: %v", err)
-        
-        // 创建一个新的记录 - 只包含电影详情，不包含磁力链接
-        // 这样可以避免启动时恢复种子时尝试使用无效的磁力链接
-        currentTime := time.Now()
-        record = &db.TorrentRecord{
-            InfoHash:     infoHash,
-            Name:         movieDetails.Filename, 
-            MagnetURI:    "", // 空的磁力链接，但不会尝试添加它
-            AddedAt:      currentTime,
-            MovieDetails: &movieDetails,
-        }
-            
-        // 保存新记录到数据库
-        if err := h.torrentStore.SaveTorrent(record); err != nil {
-            http.Error(w, "Failed to save torrent record: "+err.Error(), http.StatusInternalServerError)
-            return
-        }
-        
-        log.Printf("Created new movie record for: %s", infoHash)
+
+		// 创建一个新的记录 - 只包含电影详情，不包含磁力链接
+		// 这样可以避免启动时恢复种子时尝试使用无效的磁力链接
+		currentTime := time.Now()
+		record = &db.TorrentRecord{
+			InfoHash:     infoHash,
+			Name:         movieDetails.Filename,
+			MagnetURI:    "", // 空的磁力链接，但不会尝试添加它
+			AddedAt:      currentTime,
+			MovieDetails: &movieDetails,
+		}
+
+		// 保存新记录到数据库
+		if err := h.torrentStore.AddTorrent(record); err != nil {
+			http.Error(w, "Failed to save torrent record: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Created new movie record for: %s", infoHash)
 	} else {
 		// 更新电影详情，保留原有的磁力链接和其他信息
 		record.MovieDetails = &movieDetails
-		
+
 		// 保存更新后的记录到数据库
-		if err := h.torrentStore.SaveTorrent(record); err != nil {
+		if err := h.torrentStore.AddTorrent(record); err != nil {
 			http.Error(w, "Failed to save movie details: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -610,7 +550,7 @@ func (h *Handler) SaveTorrentData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update the data_path in the database
-	if err := h.torrentStore.SaveTorrent(&torrentRecord); err != nil {
+	if err := h.torrentStore.AddTorrent(&torrentRecord); err != nil {
 		http.Error(w, "Failed to update data path: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
