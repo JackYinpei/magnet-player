@@ -115,7 +115,7 @@ export async function getMovieInfo(name) {
     "status": "Released",
     "tmdbId": 0,
     "voteCount": 10,
-    "year": ""
+    "year": 2024
   });
 
   // 原始API调用方式（已注释）
@@ -137,7 +137,7 @@ export async function saveMovieDetails(infoHash, movie) {
     throw new Error('电影详情不能为空');
   }
 
-  return fetchWithErrorHandling(`${API_BASE_URL}/api/torrents/movie-details/${infoHash}`, {
+  return fetchWithErrorHandling(`${API_BASE_URL}/api/movie-details/${infoHash}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -181,4 +181,28 @@ export function formatProgress(progress) {
   }
 
   return `${Math.round(progress * 100)}%`;
+}
+
+/**
+ * 保存种子数据（包括文件路径）到数据库
+ * @param {string} infoHash 种子的 info hash
+ * @param {Object} torrentData 种子数据
+ * @returns {Promise<Object>} 保存结果
+ */
+export async function saveTorrentData(infoHash, torrentData) {
+  if (!infoHash) {
+    throw new Error('Info hash 不能为空');
+  }
+
+  if (!torrentData) {
+    throw new Error('种子数据不能为空');
+  }
+
+  return fetchWithErrorHandling(`${API_BASE_URL}/api/torrents/save-data/${infoHash}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(torrentData),
+  });
 }

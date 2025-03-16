@@ -12,9 +12,9 @@ const MovieCard = ({ movie: initialMovie }) => {
   
   const handleGetDetails = async () => {
     try {
-      const details = await getMovieInfo(movie.name);
+      const details = await getMovieInfo(movie.infoHash);
       setMovie({ ...movie, MovieDetails: details });
-      await saveMovieDetails(movie.InfoHash, details)
+      await saveMovieDetails(movie.infoHash, details)
     } catch (error) {
       console.error("Failed to fetch movie details:", error);
     }

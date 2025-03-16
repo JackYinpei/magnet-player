@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { addMagnet, saveMovieDetails } from '@/lib/api';
+import { addMagnet, saveMovieDetails, saveTorrentData } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -39,6 +39,14 @@ export function TorrentForm({ onTorrentAdded }) {
       const newTorrent = await addMagnet(magnetUri);
       console.log("新增的：",newTorrent);
       
+      // 保存种子数据到数据库
+      try {
+        await saveTorrentData(newTorrent.infoHash, newTorrent);
+        console.log("种子数据已保存到数据库");
+      } catch (saveErr) {
+        console.error("保存种子数据失败:", saveErr);
+        // 继续处理，不中断流程
+      }
       
       // 这一步可以先保存magnet 的基本信息
       // await saveMovieDetails(newTorrent.InfoHash, newTorrent.MovieDetails);

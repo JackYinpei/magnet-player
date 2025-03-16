@@ -69,7 +69,8 @@ func main() {
 	// Add new endpoints
 	http.HandleFunc("/magnet/api/get-movie-details", apiHandler.GetMovieDetails)
 	http.HandleFunc("/magnet/api/search", apiHandler.SearchMovie)
-	http.HandleFunc("/magnet/api/torrents/movie-details/", apiHandler.UpdateMovieDetails)
+	http.HandleFunc("/magnet/api/movie-details/", apiHandler.UpdateMovieDetails)
+	http.HandleFunc("/magnet/api/torrents/save-data/", apiHandler.SaveTorrentData)
 
 	// Enable CORS
 	http.HandleFunc("/magnet/", func(w http.ResponseWriter, r *http.Request) {
