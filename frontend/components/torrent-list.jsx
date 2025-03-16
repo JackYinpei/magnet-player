@@ -13,6 +13,8 @@ const MovieCard = ({ movie: initialMovie }) => {
   const handleGetDetails = async () => {
     try {
       const details = await getMovieInfo(movie.infoHash);
+      console.log(details, "查看details");
+      
       setMovie({ ...movie, MovieDetails: details });
       await saveMovieDetails(movie.infoHash, details)
     } catch (error) {
@@ -24,10 +26,10 @@ const MovieCard = ({ movie: initialMovie }) => {
     <div className="flex flex-col md:flex-row overflow-hidden bg-card border rounded-lg shadow-lg mb-6 hover:shadow-xl transition-shadow duration-300">
       {/* Movie Poster */}
       <div className="relative w-full md:w-64 h-80 flex-shrink-0">
-        {movie?.MovieDetails?.posterUrl ? (
+        {movie?.MovieDetails?.poster_path ? (
           <img 
-            src={movie.MovieDetails.posterUrl} 
-            alt={movie.MovieDetails.originalTitle || movie.name}
+            src={"https://image.tmdb.org/t/p/w500" + movie.MovieDetails.poster_path} 
+            alt={movie.MovieDetails.original_title || movie.name}
             className="w-full h-full object-cover"
           />
         ) : (
@@ -44,14 +46,14 @@ const MovieCard = ({ movie: initialMovie }) => {
           {/* Title and Rating */}
           <div className="flex justify-between items-start mb-2">
             <h2 className="text-2xl font-bold text-foreground">
-              {movie?.MovieDetails?.originalTitle || movie.name}
+              {movie?.MovieDetails?.original_title || movie.name}
             </h2>
-            {movie?.MovieDetails?.rating && (
+            {movie?.MovieDetails?.vote_average && (
               <div className="flex items-center text-yellow-500">
                 <Star className="fill-yellow-500 mr-1" size={18} />
-                <span>{movie.MovieDetails.rating}</span>
-                {movie.MovieDetails.voteCount && (
-                  <span className="text-sm text-muted-foreground ml-1">({movie.MovieDetails.voteCount})</span>
+                <span>{movie.MovieDetails.vote_average}</span>
+                {movie.MovieDetails.vote_count && (
+                  <span className="text-sm text-muted-foreground ml-1">({movie.MovieDetails.vote_count})</span>
                 )}
               </div>
             )}
@@ -60,13 +62,13 @@ const MovieCard = ({ movie: initialMovie }) => {
           {/* Release Year and Runtime */}
           {movie?.MovieDetails && (
             <div className="flex flex-wrap gap-3 text-sm text-muted-foreground mb-3">
-              {movie.MovieDetails.releaseDate && (
+              {movie.MovieDetails.release_date && (
                 <div className="flex items-center">
                   <Calendar size={16} className="mr-1" />
-                  <span>{new Date(movie.MovieDetails.releaseDate).getFullYear()}</span>
+                  <span>{new Date(movie.MovieDetails.release_date).getFullYear()}</span>
                 </div>
               )}
-              {movie.MovieDetails.runtime && (
+              {/* {movie.MovieDetails.runtime && (
                 <div className="flex items-center">
                   <Clock size={16} className="mr-1" />
                   <span>{movie.MovieDetails.runtime} min</span>
@@ -76,7 +78,7 @@ const MovieCard = ({ movie: initialMovie }) => {
                 <div className="px-2 py-0.5 bg-primary/10 text-primary rounded-full">
                   {movie.MovieDetails.status}
                 </div>
-              )}
+              )} */}
             </div>
           )}
           
