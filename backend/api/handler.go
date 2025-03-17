@@ -200,38 +200,52 @@ func (h *Handler) StreamFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract torrent info hash and file index from the URL path
-	// Expected format: /stream/{infoHash}/{fileIndex}
+	fmt.Println(r.URL.Path, "StreamFile file path")
+
+	// Extract torrent info hash and file name from the URL path
+	// Expected format: /stream/{infoHash}/{fileName}
 	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 4 {
-		http.Error(w, "Invalid path format", http.StatusBadRequest)
-		return
-	}
+	infoHash := pathParts[3]
+	fileName := pathParts[4]
 
-	infoHash := pathParts[2]
-	fileIndexStr := pathParts[3]
-
-	// Parse the file index
-	fileIndex, err := strconv.Atoi(fileIndexStr)
-	if err != nil {
-		http.Error(w, "Invalid file index", http.StatusBadRequest)
-		return
-	}
+	fmt.Println(infoHash, fileName, "StreamFile infoHash and fileName", pathParts)
 
 	// Get the torrent
 	t, ok := h.torrentClient.GetTorrent(infoHash)
 	if !ok {
+		fmt.Println("Torrent not found", infoHash)
 		http.Error(w, "Torrent not found", http.StatusNotFound)
 		return
 	}
 
-	// Check if the file index is valid
-	if fileIndex < 0 || fileIndex >= len(t.Files()) {
-		http.Error(w, "File index out of range", http.StatusBadRequest)
+	found := false
+	var fileIndex int
+
+	// 获取文件列表
+	filesList, listErr := h.torrentClient.ListFiles(infoHash)
+	if listErr != nil {
+		fmt.Println("Failed to list files", listErr)
+		http.Error(w, "Failed to list files: "+listErr.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Get the file
+	// 通过文件名查找匹配的文件
+	for _, f := range filesList {
+		if f.Path == fileName {
+			fmt.Println("File found", f)
+			fileIndex = f.FileIndex
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		fmt.Println("File not found", fileName)
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	// 获取原始文件对象
 	file := t.Files()[fileIndex]
 
 	// Set content type based on file extension
@@ -284,17 +298,18 @@ func (h *Handler) StreamFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Stream the file
+	var streamErr error
 	if end > 0 {
 		// Stream a range
-		_, err = io.CopyN(w, reader, end-start+1)
+		_, streamErr = io.CopyN(w, reader, end-start+1)
 	} else {
 		// Stream the whole file
-		_, err = io.Copy(w, reader)
+		_, streamErr = io.Copy(w, reader)
 	}
 
-	if err != nil {
+	if streamErr != nil {
 		// Don't return an error, as the client may have disconnected
-		log.Printf("Error streaming file: %v", err)
+		log.Printf("Error streaming file: %v", streamErr)
 	}
 }
 
@@ -371,28 +386,9 @@ func (h *Handler) GetMovieDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract only the necessary movie information for the UI
-	type MovieInfo struct {
-		InfoHash     string           `json:"infoHash"`
-		Name         string           `json:"name"`
-		AddedAt      time.Time        `json:"addedAt"`
-		MovieDetails *db.MovieDetails `json:"movieDetails,omitempty"`
-	}
-
-	movieInfoList := make([]MovieInfo, 0, len(records))
-	for _, record := range records {
-		movieInfo := MovieInfo{
-			InfoHash:     record.InfoHash,
-			Name:         record.Name,
-			AddedAt:      record.AddedAt,
-			MovieDetails: record.MovieDetails,
-		}
-		movieInfoList = append(movieInfoList, movieInfo)
-	}
-
 	// Return the movie details
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(movieInfoList)
+	json.NewEncoder(w).Encode(records)
 }
 
 // SearchMovie handles requests to search for a movie by name

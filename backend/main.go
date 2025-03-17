@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -46,9 +47,10 @@ func main() {
 		log.Printf("从数据库获取种子失败: %v", err)
 	} else {
 		for _, t := range torrents {
+			fmt.Printf("恢复种子%+v", t)
 			if t.MagnetURI != "" {
-				log.Printf("正在恢复种子: %s", t.Name)
-				_, err := torrentClient.AddMagnet(t.MagnetURI)
+				log.Printf("正在恢复种子: %s, %s", t.Name, t.InfoHash)
+				_, err := torrentClient.AddMagnet("magnet:?xt=urn:btih:" + t.InfoHash)
 				if err != nil {
 					log.Printf("恢复种子失败 %s: %v", t.InfoHash, err)
 				}

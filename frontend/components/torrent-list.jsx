@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import Image from 'next/image';
 import { formatFileSize, formatProgress } from '@/lib/utils';
 import { Calendar, Clock, Film, Star, Users } from 'lucide-react';
+import Link from 'next/link';
 
 const MovieCard = ({ movie: initialMovie }) => {
   const [movie, setMovie] = useState(initialMovie);
@@ -15,7 +16,7 @@ const MovieCard = ({ movie: initialMovie }) => {
       const details = await getMovieInfo(movie.infoHash);
       console.log(details, "查看details");
       
-      setMovie({ ...movie, MovieDetails: details });
+      setMovie({ ...movie, movieDetails: details });
       await saveMovieDetails(movie.infoHash, details)
     } catch (error) {
       console.error("Failed to fetch movie details:", error);
@@ -26,10 +27,10 @@ const MovieCard = ({ movie: initialMovie }) => {
     <div className="flex flex-col md:flex-row overflow-hidden bg-card border rounded-lg shadow-lg mb-6 hover:shadow-xl transition-shadow duration-300">
       {/* Movie Poster */}
       <div className="relative w-full md:w-64 h-80 flex-shrink-0">
-        {movie?.MovieDetails?.poster_path ? (
+        {movie?.movieDetails?.poster_path ? (
           <img 
-            src={"https://image.tmdb.org/t/p/w500" + movie.MovieDetails.poster_path} 
-            alt={movie.MovieDetails.original_title || movie.name}
+            src={"https://image.tmdb.org/t/p/w500" + movie.movieDetails.poster_path} 
+            alt={movie.movieDetails.original_title || movie.name}
             className="w-full h-full object-cover"
           />
         ) : (
@@ -46,46 +47,46 @@ const MovieCard = ({ movie: initialMovie }) => {
           {/* Title and Rating */}
           <div className="flex justify-between items-start mb-2">
             <h2 className="text-2xl font-bold text-foreground">
-              {movie?.MovieDetails?.original_title || movie.name}
+              {movie?.movieDetails?.original_title || movie.name}
             </h2>
-            {movie?.MovieDetails?.vote_average && (
+            {movie?.movieDetails?.vote_average && (
               <div className="flex items-center text-yellow-500">
                 <Star className="fill-yellow-500 mr-1" size={18} />
-                <span>{movie.MovieDetails.vote_average}</span>
-                {movie.MovieDetails.vote_count && (
-                  <span className="text-sm text-muted-foreground ml-1">({movie.MovieDetails.vote_count})</span>
+                <span>{movie.movieDetails.vote_average}</span>
+                {movie.movieDetails.vote_count && (
+                  <span className="text-sm text-muted-foreground ml-1">({movie.movieDetails.vote_count})</span>
                 )}
               </div>
             )}
           </div>
           
           {/* Release Year and Runtime */}
-          {movie?.MovieDetails && (
+          {movie?.movieDetails && (
             <div className="flex flex-wrap gap-3 text-sm text-muted-foreground mb-3">
-              {movie.MovieDetails.release_date && (
+              {movie.movieDetails.release_date && (
                 <div className="flex items-center">
                   <Calendar size={16} className="mr-1" />
-                  <span>{new Date(movie.MovieDetails.release_date).getFullYear()}</span>
+                  <span>{new Date(movie.movieDetails.release_date).getFullYear()}</span>
                 </div>
               )}
-              {/* {movie.MovieDetails.runtime && (
+              {/* {movie.movieDetails.runtime && (
                 <div className="flex items-center">
                   <Clock size={16} className="mr-1" />
-                  <span>{movie.MovieDetails.runtime} min</span>
+                  <span>{movie.movieDetails.runtime} min</span>
                 </div>
               )}
-              {movie.MovieDetails.status && (
+              {movie.movieDetails.status && (
                 <div className="px-2 py-0.5 bg-primary/10 text-primary rounded-full">
-                  {movie.MovieDetails.status}
+                  {movie.movieDetails.status}
                 </div>
               )} */}
             </div>
           )}
           
           {/* Genres */}
-          {movie?.MovieDetails?.genres && movie.MovieDetails.genres.length > 0 && (
+          {movie?.movieDetails?.genres && movie.movieDetails.genres.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-3">
-              {movie.MovieDetails.genres.map((genre, index) => (
+              {movie.movieDetails.genres.map((genre, index) => (
                 <span key={index} className="px-2 py-1 bg-secondary text-secondary-foreground rounded-md text-xs">
                   {genre}
                 </span>
@@ -95,18 +96,67 @@ const MovieCard = ({ movie: initialMovie }) => {
           
           {/* Overview */}
           <p className="text-sm text-card-foreground mb-4 flex-grow">
-            {movie?.MovieDetails?.overview || movie.description || "No description available."}
+            {movie?.movieDetails?.overview || movie.description || "No description available."}
           </p>
           
+          {/* Files List */}
+          {movie.files && movie.files.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold mb-2">Files</h3>
+              <div className="space-y-2">
+                {movie.files.map((file, index) => (
+                  <div 
+                    key={index} 
+                    className={`p-2 rounded-md text-sm border ${file.isVideo && file.isPlayable ? 'hover:bg-secondary/50 cursor-pointer' : 'opacity-70'}`}
+                  >
+                    {file.isVideo && file.isPlayable ? (
+                      <Link href={`/player/${file.torrentId}/${encodeURIComponent(file.path)}`}>
+                        <div className="flex flex-col">
+                          <div className="flex justify-between mb-1">
+                            <span className="font-medium truncate">{file.path.split('/').pop()}</span>
+                            <span className="text-xs text-muted-foreground">{formatFileSize(file.length)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className={`${file.isVideo ? 'text-blue-500' : 'text-gray-500'}`}>
+                              {file.isVideo ? 'Video' : 'Other'} • Progress: {formatProgress(file.progress)}
+                            </span>
+                            {file.isVideo && file.isPlayable && (
+                              <span className="text-green-500">Playable</span>
+                            )}
+                          </div>
+                        </div>
+                      </Link>
+                    ) : (
+                      <div className="flex flex-col">
+                        <div className="flex justify-between mb-1">
+                          <span className="font-medium truncate">{file.path.split('/').pop()}</span>
+                          <span className="text-xs text-muted-foreground">{formatFileSize(file.length)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className={`${file.isVideo ? 'text-blue-500' : 'text-gray-500'}`}>
+                            {file.isVideo ? 'Video' : 'Other'} • Progress: {formatProgress(file.progress)}
+                          </span>
+                          {file.isVideo && !file.isPlayable && (
+                            <span className="text-yellow-500">Not yet playable</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
           {/* Filename info (if available) */}
-          {movie?.MovieDetails?.filename && (
+          {movie?.movieDetails?.filename && (
             <div className="text-xs text-muted-foreground mb-3 truncate">
-              <span className="font-semibold">Filename:</span> {movie.MovieDetails.filename}
+              <span className="font-semibold">Filename:</span> {movie.movieDetails.filename}
             </div>
           )}
           
           {/* Get Details Button */}
-          {!movie?.MovieDetails && (
+          {!movie?.movieDetails && (
             <div className="mt-auto">
               <Button onClick={handleGetDetails} variant="outline" className="w-full">
                 获取详情
