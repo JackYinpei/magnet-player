@@ -1,5 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Link from "next/link";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,7 +26,7 @@ export default function RootLayout({ children }) {
         <header className="border-b">
           <div className="container mx-auto px-4 py-4">
             <h1 className="text-2xl font-bold">
-              <a href="/">Torrent Player</a>
+              <Link href="/">Torrent Player</Link>
             </h1>
           </div>
         </header>

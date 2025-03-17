@@ -42,7 +42,7 @@ export default function Home() {
           <div className="space-y-4">
             <h3 className="text-lg font-medium">添加磁力链接</h3>
             <p className="text-muted-foreground">
-              粘贴一个磁力链接来添加一个新的种子。链接格式应该以 "magnet:?" 开头。
+              粘贴一个磁力链接来添加一个新的种子。链接格式应该以 &quot;magnet:?&quot; 开头。
             </p>
             <TorrentForm onTorrentAdded={handleTorrentAdded} />
           </div>
