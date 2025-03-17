@@ -100,47 +100,51 @@ export function getStreamUrl(infoHash, fileIndex) {
 export async function getMovieInfo(name) {
   // 直接返回mock数据，确保字段名称与期望的完全一致
   // return Promise.resolve({
-  //   "backdropUrl": "https://via.placeholder.com/1280x720?text=%E3%80%90%E9%AB%98%E6%B8%85%E5%BD%B1%E8%A7%86%E4%B9%8B%E5%AE%B6%E5%8F%91%E5%B8%83+www.WHATMV.com%E3%80%91%E8%9C%A1%E7%AC%94%E5%B0%8F%E6%96%B0%EF%BC%9A%E6%88%91%E4%BB%AC%E7%9A%84%E6%81%90%E9%BE%99%E6%97%A5%E8%AE%B0%5B%E5%9B%BD%E6%97%A5%E5%A4%9A%E9%9F%B3%E8%BD%A8%2B%E4%B8%AD%E6%96%87%E5%AD%97%E5%B9%95%5D.2024.1080p.HamiVideo.WEB-DL.AAC2.0.H.264-DreamHD",
-  //   "filename": "【高清影视之家发布 www.WHATMV.com】蜡笔小新：我们的恐龙日记[国日多音轨+中文字幕].2024.1080p.HamiVideo.WEB-DL.AAC2.0.H.264-DreamHD",
+  //   "filename": "某种物质",
+  //   "year": 2024,
+  //   "posterUrl": "https://image.tmdb.org/t/p/original/oDDYHINnemOisgswvLU0EZuHLFH.jpg",
+  //   "backdropUrl": "https://image.tmdb.org/t/p/original/t98L9uphqBSNn2Mkvdm3xSFCQyi.jpg",
+  //   "overview": "曾经红极一时的好莱坞巨星伊丽莎白无法面对自己老去的容颜，决定使用一种名为“完美物质”的黑市药物，透过注射药物的细胞复制物质，创造出更年轻、更好的另一个自己。“年华老去”及“年轻貌美”的自己该如何共存？会是更强烈的容貌焦虑大战？还是要不断迎合大众对“美”的期待？一场自我身体主导权的争夺战即将上演……",
+  //   "rating": 7.1,
+  //   "voteCount": 4204,
   //   "genres": [
-  //     "未知"
+  //     "恐怖",
+  //     "科幻",
+  //     "剧情",
+  //     "喜剧"
   //   ],
-  //   "originalTitle": "【高清影视之家发布 www.WHATMV.com】蜡笔小新：我们的恐龙日记[国日多音轨+中文字幕].2024.1080p.HamiVideo.WEB-DL.AAC2.0.H.264-DreamHD",
-  //   "overview": "这是关于 【高清影视之家发布 www.WHATMV.com】蜡笔小新：我们的恐龙日记[国日多音轨+中文字幕].2024.1080p.HamiVideo.WEB-DL.AAC2.0.H.264-DreamHD 的电影简介。",
-  //   "popularity": 1,
-  //   "posterUrl": "https://via.placeholder.com/300x450?text=%E3%80%90%E9%AB%98%E6%B8%85%E5%BD%B1%E8%A7%86%E4%B9%8B%E5%AE%B6%E5%8F%91%E5%B8%83+www.WHATMV.com%E3%80%91%E8%9C%A1%E7%AC%94%E5%B0%8F%E6%96%B0%EF%BC%9A%E6%88%91%E4%BB%AC%E7%9A%84%E6%81%90%E9%BE%99%E6%97%A5%E8%AE%B0%5B%E5%9B%BD%E6%97%A5%E5%A4%9A%E9%9F%B3%E8%BD%A8%2B%E4%B8%AD%E6%96%87%E5%AD%97%E5%B9%95%5D.2024.1080p.HamiVideo.WEB-DL.AAC2.0.H.264-DreamHD",
-  //   "rating": 5,
-  //   "releaseDate": "2025-03-14",
-  //   "runtime": 90,
+  //   "runtime": 141,
+  //   "tmdbId": 933260,
+  //   "releaseDate": "2024-09-07",
+  //   "originalTitle": "The Substance",
+  //   "popularity": 6.078,
   //   "status": "Released",
-  //   "tmdbId": 0,
-  //   "voteCount": 10,
-  //   "year": 2024
+  //   "tagline": "如果按照说明去做，会出什么问题？"
   // });
-  return Promise.resolve({
-    "adult": false,
-    "backdrop_path": "/vW7lwVHkRePHzayZfoKOyYBeZqO.jpg",
-    "genre_ids": [
-      16,
-      12,
-      35,
-      10751
-    ],
-    "id": 1221404,
-    "original_language": "ja",
-    "original_title": "映画クレヨンしんちゃん オラたちの恐竜日記",
-    "overview": "Follow the friendship between the Nobara family's pet dog Shiro and a \"small dinosaur\". Their connection helps the growth of Shinnosuke and the Kusakabe Defense Squad.",
-    "popularity": 0.908,
-    "poster_path": "/n7YcOeqPOmvQ2PUatn4UqV5YStj.jpg",
-    "release_date": "2024-08-09",
-    "title": "Crayon Shin-chan the Movie: Our Dinosaur Diary",
-    "video": false,
-    "vote_average": 5.7,
-    "vote_count": 20
-  });
+  // return Promise.resolve({
+  //   "adult": false,
+  //   "backdrop_path": "/vW7lwVHkRePHzayZfoKOyYBeZqO.jpg",
+  //   "genre_ids": [
+  //     16,
+  //     12,
+  //     35,
+  //     10751
+  //   ],
+  //   "id": 1221404,
+  //   "original_language": "ja",
+  //   "original_title": "映画クレヨンしんちゃん オラたちの恐竜日記",
+  //   "overview": "Follow the friendship between the Nobara family's pet dog Shiro and a \"small dinosaur\". Their connection helps the growth of Shinnosuke and the Kusakabe Defense Squad.",
+  //   "popularity": 0.908,
+  //   "poster_path": "/n7YcOeqPOmvQ2PUatn4UqV5YStj.jpg",
+  //   "release_date": "2024-08-09",
+  //   "title": "Crayon Shin-chan the Movie: Our Dinosaur Diary",
+  //   "video": false,
+  //   "vote_average": 5.7,
+  //   "vote_count": 20
+  // });
 
   // 原始API调用方式（已注释）
-  // return fetchWithErrorHandling(`${API_BASE_URL}/api/search?filename=${encodeURIComponent(name)}`);
+  return fetchWithErrorHandling(`${API_BASE_URL}/search?filename=${encodeURIComponent(name)}`);
 }
 
 /**

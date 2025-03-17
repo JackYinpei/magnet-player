@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -171,7 +170,7 @@ func (h *Handler) UpdateMovieDetails(w http.ResponseWriter, r *http.Request) {
 		record.MovieDetails = &movieDetails
 
 		// 保存更新后的记录到数据库
-		if err := h.torrentStore.AddTorrent(record); err != nil {
+		if err := h.torrentStore.UpdateTorrent(record); err != nil {
 			http.Error(w, "Failed to save movie details: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -391,86 +390,6 @@ func (h *Handler) GetMovieDetails(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(records)
 }
 
-// SearchMovie handles requests to search for a movie by name
-func (h *Handler) SearchMovie(w http.ResponseWriter, r *http.Request) {
-	// Set CORS headers
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Get the filename from the URL query
-	filename := r.URL.Query().Get("filename")
-	if filename == "" {
-		http.Error(w, "Missing filename parameter", http.StatusBadRequest)
-		return
-	}
-
-	// TODO: Implement actual movie info lookup from an external API
-	// For now, we'll return a mock response with basic movie details based on the filename
-
-	// Extract the movie name and year from the filename using basic parsing
-	// This is a simple implementation and might not work for all filenames
-	name := filename
-	year := ""
-
-	// Try to extract year in format (YYYY) or .YYYY.
-	yearPattern1 := strings.LastIndex(name, "(")
-	yearPattern2 := strings.LastIndex(name, ".")
-
-	if yearPattern1 != -1 && yearPattern1+5 <= len(name) && name[yearPattern1+1] >= '1' && name[yearPattern1+1] <= '2' {
-		// Extract year from (YYYY) format
-		yearStr := name[yearPattern1+1 : yearPattern1+5]
-		if _, err := strconv.Atoi(yearStr); err == nil {
-			year = yearStr
-			name = strings.TrimSpace(name[:yearPattern1])
-		}
-	} else if yearPattern2 != -1 && yearPattern2+5 <= len(name) && name[yearPattern2+1] >= '1' && name[yearPattern2+1] <= '2' {
-		// Extract year from .YYYY. format
-		yearStr := name[yearPattern2+1 : yearPattern2+5]
-		if _, err := strconv.Atoi(yearStr); err == nil {
-			year = yearStr
-			name = strings.TrimSpace(name[:yearPattern2])
-		}
-	}
-
-	// Clean up the name by removing common suffixes and file extensions
-	name = strings.TrimSuffix(name, ".mp4")
-	name = strings.TrimSuffix(name, ".mkv")
-	name = strings.TrimSuffix(name, ".avi")
-
-	// Create a mock movie info response
-	movieInfo := map[string]interface{}{
-		"filename":      name,
-		"year":          year,
-		"posterUrl":     "https://via.placeholder.com/300x450?text=" + url.QueryEscape(name),
-		"backdropUrl":   "https://via.placeholder.com/1280x720?text=" + url.QueryEscape(name),
-		"overview":      "这是关于 " + name + " 的电影简介。",
-		"rating":        5.0,
-		"voteCount":     10,
-		"genres":        []string{"未知"},
-		"runtime":       90,
-		"tmdbId":        0,
-		"releaseDate":   time.Now().Format("2006-01-02"),
-		"originalTitle": name,
-		"popularity":    1.0,
-		"status":        "Released",
-	}
-
-	// Return the movie info
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(movieInfo)
-}
-
 // SaveTorrentData handles requests to save torrent data including file paths to the database
 func (h *Handler) SaveTorrentData(w http.ResponseWriter, r *http.Request) {
 	// Set CORS headers
@@ -546,7 +465,7 @@ func (h *Handler) SaveTorrentData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update the data_path in the database
-	if err := h.torrentStore.AddTorrent(&torrentRecord); err != nil {
+	if err := h.torrentStore.UpdateTorrent(&torrentRecord); err != nil {
 		http.Error(w, "Failed to update data path: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

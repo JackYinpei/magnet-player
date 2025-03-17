@@ -27,20 +27,35 @@ type TorrentRecord struct {
 
 // MovieDetails represents the movie information
 type MovieDetails struct {
-	Adult            bool    `json:"adult"`
-	BackdropPath     string  `json:"backdrop_path,omitempty"`
-	GenreIds         []int   `json:"genre_ids,omitempty"`
-	Id               int     `json:"id,omitempty"`
-	OriginalLanguage string  `json:"original_language,omitempty"`
-	OriginalTitle    string  `json:"original_title,omitempty"`
-	Overview         string  `json:"overview,omitempty"`
-	Popularity       float64 `json:"popularity,omitempty"`
-	PosterPath       string  `json:"poster_path,omitempty"`
-	ReleaseDate      string  `json:"releaseDate,omitempty"`
-	Title            string  `json:"title,omitempty"`
-	Video            bool    `json:"video,omitempty"`
-	VoteAverage      float64 `json:"vote_average,omitempty"`
-	VoteCount        int     `json:"vote_count,omitempty"`
+	Filename      string   `json:"filename,omitempty"`
+	Year          int      `json:"year,omitempty"`
+	PosterUrl     string   `json:"posterUrl,omitempty"`
+	BackdropUrl   string   `json:"backdropUrl,omitempty"`
+	Overview      string   `json:"overview,omitempty"`
+	Rating        float64  `json:"rating,omitempty"`
+	VoteCount     int      `json:"voteCount,omitempty"`
+	Genres        []string `json:"genres,omitempty"`
+	Runtime       int      `json:"runtime,omitempty"`
+	TmdbId        int      `json:"tmdbId,omitempty"`
+	ReleaseDate   string   `json:"releaseDate,omitempty"`
+	OriginalTitle string   `json:"originalTitle,omitempty"`
+	Popularity    float64  `json:"popularity,omitempty"`
+	Status        string   `json:"status,omitempty"`
+	Tagline       string   `json:"tagline,omitempty"`
+	// Adult            bool    `json:"adult"`
+	// BackdropPath     string  `json:"backdrop_path,omitempty"`
+	// GenreIds         []int   `json:"genre_ids,omitempty"`
+	// Id               int     `json:"id,omitempty"`
+	// OriginalLanguage string  `json:"original_language,omitempty"`
+	// OriginalTitle    string  `json:"original_title,omitempty"`
+	// Overview         string  `json:"overview,omitempty"`
+	// Popularity       float64 `json:"popularity,omitempty"`
+	// PosterPath       string  `json:"poster_path,omitempty"`
+	// ReleaseDate      string  `json:"releaseDate,omitempty"`
+	// Title            string  `json:"title,omitempty"`
+	// Video            bool    `json:"video,omitempty"`
+	// VoteAverage      float64 `json:"vote_average,omitempty"`
+	// VoteCount        int     `json:"vote_count,omitempty"`
 }
 
 // FileInfo represents information about a file in a torrent

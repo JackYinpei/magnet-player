@@ -246,9 +246,9 @@ func GetMovieDetails(movieName string, year int) (MovieInfo, error) {
 		return MovieInfo{}, fmt.Errorf("TMDB_API_KEY environment variable not set")
 	}
 
-	url := "https://api.themoviedb.org/3/search/movie?query=%s&include_adult=true&page=1&year=%d"
+	url := "https://api.themoviedb.org/3/search/movie?query=%s&include_adult=true&page=1"
 
-	req, _ := http.NewRequest("GET", fmt.Sprintf(url, urlPkg.QueryEscape(movieName), year), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf(url, urlPkg.QueryEscape(movieName)), nil)
 
 	req.Header.Add("accept", "application/json")
 	req.Header.Add("Authorization", "Bearer "+tmdbAPIKey)
