@@ -284,25 +284,14 @@ func (s *TorrentStore) UpdateTorrent(record *TorrentRecord) error {
 		return err
 	}
 
-	// Convert MovieDetails to JSON if it exists
-	var movieDetailsJSON []byte
-	if record.MovieDetails != nil {
-		movieDetailsJSON, err = json.Marshal(record.MovieDetails)
-		if err != nil {
-			return err
-		}
-	}
-
 	// Update the torrent record
 	_, err = s.db.Exec(`
 		UPDATE torrents 
-		SET name = ?, magnet_uri = ?, added_at = ?, data_path = ?, 
-		    length = ?, files = ?, downloaded = ?, progress = ?, state = ?, movie_details = ?
+		SET name = ?, magnet_uri = ?, added_at = ?, data_path = ?, length = ?, files = ?, downloaded = ?, progress = ?, state = ?
 		WHERE info_hash = ?
 	`,
 		record.Name, record.MagnetURI, record.AddedAt, record.DataPath,
-		record.Length, string(filesJSON), record.Downloaded, record.Progress, record.State,
-		string(movieDetailsJSON), record.InfoHash,
+		record.Length, string(filesJSON), record.Downloaded, record.Progress, record.State, record.InfoHash,
 	)
 	return err
 }

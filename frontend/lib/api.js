@@ -122,25 +122,25 @@ export async function getMovieInfo(name) {
   //   "tagline": "如果按照说明去做，会出什么问题？"
   // });
   // return Promise.resolve({
-  //   "adult": false,
-  //   "backdrop_path": "/vW7lwVHkRePHzayZfoKOyYBeZqO.jpg",
-  //   "genre_ids": [
-  //     16,
-  //     12,
-  //     35,
-  //     10751
+  //   "filename": "蜡笔小新：我们的恐龙日记",
+  //   "year": 2024,
+  //   "posterUrl": "https://image.tmdb.org/t/p/original/dTBhi2Y674JHaAktl550vpmxjF5.jpg",
+  //   "backdropUrl": "https://image.tmdb.org/t/p/original/vW7lwVHkRePHzayZfoKOyYBeZqO.jpg",
+  //   "overview": "在野原新之助的五岁暑假，东京新开了一个现代复活恐龙的主题公园，迎来了前所未有的恐龙热潮。而在春日部河滩旁，小白也偶遇到了一个新朋友——纳纳，随着春日部防卫队和纳纳的相处，恐龙公园背后的真相也随之揭露，巨大恐龙突然暴走街头，这次他们能否成功化解危机呢？",
+  //   "rating": 5.7,
+  //   "voteCount": 20,
+  //   "genres": [
+  //     "动画",
+  //     "冒险",
+  //     "喜剧",
+  //     "家庭"
   //   ],
-  //   "id": 1221404,
-  //   "original_language": "ja",
-  //   "original_title": "映画クレヨンしんちゃん オラたちの恐竜日記",
-  //   "overview": "Follow the friendship between the Nobara family's pet dog Shiro and a \"small dinosaur\". Their connection helps the growth of Shinnosuke and the Kusakabe Defense Squad.",
-  //   "popularity": 0.908,
-  //   "poster_path": "/n7YcOeqPOmvQ2PUatn4UqV5YStj.jpg",
-  //   "release_date": "2024-08-09",
-  //   "title": "Crayon Shin-chan the Movie: Our Dinosaur Diary",
-  //   "video": false,
-  //   "vote_average": 5.7,
-  //   "vote_count": 20
+  //   "runtime": 106,
+  //   "tmdbId": 1221404,
+  //   "releaseDate": "2024-08-09",
+  //   "originalTitle": "映画クレヨンしんちゃん オラたちの恐竜日記",
+  //   "popularity": 0.826,
+  //   "status": "Released"
   // });
 
   // 原始API调用方式（已注释）
