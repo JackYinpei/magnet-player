@@ -69,7 +69,9 @@ func main() {
 	http.HandleFunc("/magnet/search", searchhandle.SearchMovieHandler)
 	// Add new endpoints
 	http.HandleFunc("/magnet/api/get-movie-details", apiHandler.GetMovieDetails)
+	// 保存movieDetails
 	http.HandleFunc("/magnet/api/movie-details/", apiHandler.UpdateMovieDetails)
+	// 保存files 下载进度
 	http.HandleFunc("/magnet/api/torrents/save-data/", apiHandler.SaveTorrentData)
 
 	// Enable CORS

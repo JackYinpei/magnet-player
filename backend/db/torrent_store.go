@@ -296,6 +296,39 @@ func (s *TorrentStore) UpdateTorrent(record *TorrentRecord) error {
 	return err
 }
 
+// UpdateTorrentMovieDetail updates an existing torrent record in the database
+func (s *TorrentStore) UpdateTorrentMovieDetail(record *TorrentRecord) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Check if the torrent exists
+	var exists bool
+	err := s.db.QueryRow("SELECT 1 FROM torrents WHERE info_hash = ?", record.InfoHash).Scan(&exists)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("torrent with info_hash %s does not exist", record.InfoHash)
+		}
+		return err
+	}
+
+	// Convert Files slice to JSON
+	MovieDetails, err := json.Marshal(record.MovieDetails)
+	if err != nil {
+		return err
+	}
+
+	// Update the torrent record
+	_, err = s.db.Exec(`
+		UPDATE torrents 
+		SET name = ?, magnet_uri = ?, added_at = ?, data_path = ?, length = ?, movie_details = ?, downloaded = ?, progress = ?, state = ?
+		WHERE info_hash = ?
+	`,
+		record.Name, record.MagnetURI, record.AddedAt, record.DataPath,
+		record.Length, string(MovieDetails), record.Downloaded, record.Progress, record.State, record.InfoHash,
+	)
+	return err
+}
+
 // DeleteTorrent removes a torrent record from the database
 func (s *TorrentStore) DeleteTorrent(infoHash string) error {
 	s.mutex.Lock()

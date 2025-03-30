@@ -1,6 +1,7 @@
 /backend/data/
 /backend/.env
 /backend/magnetplayer
+/backend/Player.log
 
 # Node.js
 /frontend/node_modules/

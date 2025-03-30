@@ -149,28 +149,26 @@ func (h *Handler) UpdateMovieDetails(w http.ResponseWriter, r *http.Request) {
 
 		// 创建一个新的记录 - 只包含电影详情，不包含磁力链接
 		// 这样可以避免启动时恢复种子时尝试使用无效的磁力链接
-		currentTime := time.Now()
-		record = &db.TorrentRecord{
-			InfoHash:     infoHash,
-			Name:         movieDetails.OriginalTitle,
-			MagnetURI:    "", // 空的磁力链接，但不会尝试添加它
-			AddedAt:      currentTime,
-			MovieDetails: &movieDetails,
-		}
+		// currentTime := time.Now()
+		// record = &db.TorrentRecord{
+		// 	InfoHash:     infoHash,
+		// 	Name:         movieDetails.OriginalTitle,
+		// 	MagnetURI:    "", // 空的磁力链接，但不会尝试添加它
+		// 	AddedAt:      currentTime,
+		// 	MovieDetails: &movieDetails,
+		// }
 
 		// 保存新记录到数据库
-		if err := h.torrentStore.AddTorrent(record); err != nil {
-			http.Error(w, "Failed to save torrent record: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("Created new movie record for: %s", infoHash)
+		// if err := h.torrentStore.AddTorrent(record); err != nil {
+		// 	http.Error(w, "Failed to save torrent record: "+err.Error(), http.StatusInternalServerError)
+		// 	return
+		// }
 	} else {
 		// 更新电影详情，保留原有的磁力链接和其他信息
 		record.MovieDetails = &movieDetails
 
 		// 保存更新后的记录到数据库
-		if err := h.torrentStore.UpdateTorrent(record); err != nil {
+		if err := h.torrentStore.UpdateTorrentMovieDetail(record); err != nil {
 			http.Error(w, "Failed to save movie details: "+err.Error(), http.StatusInternalServerError)
 			return
 		}

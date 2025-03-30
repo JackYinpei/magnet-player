@@ -1,12 +1,12 @@
 'use client'
-import { getMovieDetails, getMovieInfo, saveMovieDetails } from '@/lib/api';
+import { getMovieDetails, getMovieInfo, saveMovieDetails, listTorrents, saveTorrentData} from '@/lib/api';
 import { useState, useEffect } from 'react';
-import { TorrentCard } from './torrent-card';
 import { Button } from './ui/button';
 import Image from 'next/image';
 import { formatFileSize, formatProgress } from '@/lib/utils';
 import { Calendar, Clock, Film, Star, Users } from 'lucide-react';
 import Link from 'next/link';
+import { useInterval } from '@/lib/hooks';
 
 const MovieCard = ({ movie: initialMovie }) => {
   const [movie, setMovie] = useState(initialMovie);
@@ -178,6 +178,33 @@ export function TorrentList() {
       console.log(details);
     });
   }, []);
+  useInterval(() => {
+    listTorrents().then((newTorrents) => {
+      console.log(newTorrents);
+      // Merge the new torrent data with existing movie details
+      setMovies(prevMovies => {
+        return newTorrents.map(newTorrent => {
+          // Find matching movie in the previous state
+          const existingMovie = prevMovies.find(m => m.infoHash === newTorrent.infoHash);
+          // Preserve movieDetails from existing movie if available
+          if (existingMovie && existingMovie.movieDetails) {
+            return { ...newTorrent, movieDetails: existingMovie.movieDetails };
+          }
+          return newTorrent;
+        });
+      });
+    });
+  }, 5000);
+
+  useInterval(()=>{
+    console.log("开始保存种子数据到数据库");
+    for (const movie of movies) {
+      console.log("保存种子数据到数据库", movie);
+      saveTorrentData(movie.infoHash, movie).then(()=>{
+        console.log("种子数据已保存到数据库");
+      })
+    }
+  }, 1000 * 60 * 1)
   return (
     <div className="container mx-auto py-6 px-4">
       <h1 className="text-3xl font-bold mb-6">影片列表</h1>
