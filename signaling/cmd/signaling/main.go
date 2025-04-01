@@ -44,7 +44,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Register client with a unique ID
 	clientID := r.URL.Query().Get("id")
 	clientType := r.URL.Query().Get("type")
-	
+
 	if clientID == "" || (clientType != "producer" && clientType != "consumer") {
 		log.Printf("Invalid client parameters")
 		return
@@ -80,7 +80,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		// Handle message based on type
 		switch msg.Type {
-		case "offer", "answer", "ice-candidate":
+		case "offer", "answer", "ice-candidate", "connect":
 			// Forward message to the other client
 			forwardMessage(clientID, msgBytes)
 		default:
@@ -123,8 +123,12 @@ func forwardMessage(senderID string, msg []byte) {
 func main() {
 	http.HandleFunc("/ws", handleWebSocket)
 
-	log.Printf("Starting signaling server on :8090")
-	if err := http.ListenAndServe(":8090", nil); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	log.Printf("Starting signaling server on :8090 (HTTPS)")
+
+	certFile := "/etc/letsencrypt/live/shiying.sh.cn/fullchain.pem"
+	keyFile := "/etc/letsencrypt/live/shiying.sh.cn/privkey.pem"
+
+	if err := http.ListenAndServeTLS(":8090", certFile, keyFile, nil); err != nil {
+		log.Fatalf("Failed to start HTTPS server: %v", err)
 	}
 }
