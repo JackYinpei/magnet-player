@@ -70,9 +70,28 @@ export default function PPlayer() {
       if (currentTime - bufferedStart > 10) {
         const removeEnd = currentTime - 5;
         log(`清理缓冲区: ${bufferedStart.toFixed(2)}s 到 ${removeEnd.toFixed(2)}s`);
-        sourceBufferRef.current.remove(bufferedStart, removeEnd);
+        
+        // 检查sourceBuffer是否正在更新
+        if (!sourceBufferRef.current.updating) {
+          sourceBufferRef.current.remove(bufferedStart, removeEnd);
+          // 在下一个更新周期处理队列中的数据
+          queueRef.current.unshift(data);
+        } else {
+          // 如果正在更新，添加事件监听器在更新结束后尝试清理
+          const onUpdateEnd = () => {
+            sourceBufferRef.current.removeEventListener('updateend', onUpdateEnd);
+            handleQuotaExceeded(data);
+          };
+          sourceBufferRef.current.addEventListener('updateend', onUpdateEnd);
+        }
+      } else {
+        // 如果没有足够的缓冲区可清理，尝试移除整个缓冲区并重新开始
+        if (!sourceBufferRef.current.updating) {
+          log('缓冲区过小无法清理，尝试移除所有缓冲区');
+          sourceBufferRef.current.remove(bufferedStart, sourceBufferRef.current.buffered.end(0));
+          queueRef.current.unshift(data);
+        }
       }
-      queueRef.current.unshift(data);
     }
   };
 
@@ -90,30 +109,95 @@ export default function PPlayer() {
     const data = queueRef.current.shift();
 
     try {
-      sourceBufferRef.current.appendBuffer(new Uint8Array(data));
-      if (!isPlaying && videoPlayerRef.current.paused) {
-        // 当有足够数据时尝试播放
-        const playPromise = videoPlayerRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              setIsPlaying(true);
-              setAutoplayBlocked(false);
-              log('视频开始播放');
-            })
-            .catch(error => {
-              setAutoplayBlocked(true);
-              log(`自动播放被阻止: ${error.message}`);
-            });
+      // 检查sourceBuffer是否可以接收数据
+      if (!sourceBufferRef.current.updating) {
+        log(`添加 ${data.byteLength} 字节到缓冲区`);
+        sourceBufferRef.current.appendBuffer(new Uint8Array(data));
+        
+        // 当缓冲区有数据时尝试播放
+        if (sourceBufferRef.current.buffered.length > 0 && 
+            videoPlayerRef.current && 
+            videoPlayerRef.current.paused) {
+          // 记录缓冲区状态
+          const start = sourceBufferRef.current.buffered.start(0);
+          const end = sourceBufferRef.current.buffered.end(0);
+          log(`缓冲区状态: ${start.toFixed(2)}s - ${end.toFixed(2)}s (${(end-start).toFixed(2)}s)`);
+          
+          // 确保视频元素有src属性
+          if (!videoPlayerRef.current.src) {
+            log('视频元素src为空，重新设置...');
+            if (mediaSourceRef.current) {
+              const objectUrl = URL.createObjectURL(mediaSourceRef.current);
+              videoPlayerRef.current.src = objectUrl;
+              log(`重新设置视频src: ${objectUrl}`);
+              videoPlayerRef.current.load();
+            } else {
+              log('错误: MediaSource未就绪，无法设置视频src');
+              return;
+            }
+          }
+          
+          // 检查src是否有效
+          if (!videoPlayerRef.current.src || videoPlayerRef.current.src === '') {
+            log('警告: 视频src仍然为空，无法播放');
+            return;
+          }
+          
+          // 当有足够数据时尝试播放
+          log('缓冲区有数据，尝试播放视频...');
+          const playPromise = videoPlayerRef.current.play();
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                setIsPlaying(true);
+                setAutoplayBlocked(false);
+                log('视频开始播放');
+              })
+              .catch(error => {
+                setAutoplayBlocked(true);
+                log(`自动播放被阻止: ${error.message}`);
+              });
+          }
         }
+      } else {
+        // 如果sourceBuffer正在更新，重新放回队列
+        queueRef.current.unshift(data);
+        setTimeout(processQueue, 100);
       }
     } catch (error) {
       log(`添加数据到缓冲区时出错: ${error.message}`);
-      isBufferReadyRef.current = true;
+      
+      // 重新放回队列
+      queueRef.current.unshift(data);
+      
       if (error.name === 'QuotaExceededError') {
         handleQuotaExceeded(data);
+      } else {
+        // 其他错误，等待一段时间后重试
+        setTimeout(() => {
+          isBufferReadyRef.current = true;
+          processQueue();
+        }, 500);
       }
     }
+  };
+
+  // 合并多个ArrayBuffer为一个
+  const combineArrayBuffers = (buffers) => {
+    let totalLength = 0;
+    buffers.forEach(buffer => {
+      totalLength += buffer.byteLength;
+    });
+    
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    
+    buffers.forEach(buffer => {
+      result.set(new Uint8Array(buffer), offset);
+      offset += buffer.byteLength;
+    });
+    
+    return result.buffer;
   };
 
   // 初始化WebRTC连接
@@ -150,6 +234,13 @@ export default function PPlayer() {
     // 监听连接状态
     pc.onconnectionstatechange = () => {
       log(`连接状态: ${pc.connectionState}`);
+      if (pc.connectionState === 'connected') {
+        // 连接建立后立即初始化MediaSource
+        log('WebRTC连接已建立，初始化MediaSource...');
+        setupMediaSource().catch(err => {
+          log(`MediaSource初始化失败: ${err.message}`);
+        });
+      }
     };
     
     // 监听ICE连接状态
@@ -303,7 +394,7 @@ export default function PPlayer() {
       updateStatus('已连接 - 数据通道已就绪');
       setIsConnected(true);
       
-      // 初始化MediaSource
+      // 初始化MediaSource - 确保在数据通道打开后直接初始化
       setupMediaSource();
     };
     
@@ -311,6 +402,15 @@ export default function PPlayer() {
       log('数据通道已关闭');
       updateStatus('数据通道已关闭');
       setIsConnected(false);
+      
+      // 如果MediaSource仍然打开，结束流
+      if (mediaSourceRef.current && mediaSourceRef.current.readyState === 'open') {
+        try {
+          mediaSourceRef.current.endOfStream();
+        } catch (e) {
+          log(`关闭MediaSource时出错: ${e.message}`);
+        }
+      }
     };
     
     channel.onerror = (error) => {
@@ -319,16 +419,31 @@ export default function PPlayer() {
     
     channel.onmessage = (event) => {
       if (typeof event.data === 'string') {
-        const message = JSON.parse(event.data);
-        if (message.type === 'file-info') {
-          log(`接收文件信息: ${message.name}, 大小: ${message.size} 字节`);
-          isReceivingFileRef.current = true;
-          receivedSizeRef.current = 0;
-          videoReceiveBufferRef.current = [];
-          return;
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'file-info') {
+            log(`接收文件信息: ${message.name}, 大小: ${message.size} 字节`);
+            isReceivingFileRef.current = true;
+            receivedSizeRef.current = 0;
+            videoReceiveBufferRef.current = [];
+            currentSeekRef.current = 0; // 重置播放位置
+            
+            // 重置MediaSource状态
+            if (mediaSourceRef.current && mediaSourceRef.current.readyState === 'open') {
+              try {
+                resetPlayer();
+                // 重新初始化MediaSource
+                setupMediaSource();
+              } catch (e) {
+                log(`重置MediaSource失败: ${e.message}`);
+              }
+            }
+            return;
+          }
+        } catch (e) {
+          // 如果不是JSON，可能是普通文本消息
+          log(`收到消息: ${event.data}`);
         }
-        // 处理其他文本消息
-        log(`收到消息: ${event.data}`);
         return;
       }
       
@@ -337,10 +452,55 @@ export default function PPlayer() {
         if (isReceivingFileRef.current) {
           receivedSizeRef.current += event.data.byteLength;
           
-          // 添加到视频处理队列
-          queueRef.current.push(event.data);
-          if (isBufferReadyRef.current) {
-            processQueue();
+          // 立即尝试处理接收到的视频数据
+          if (mediaSourceRef.current && mediaSourceRef.current.readyState === 'open' && sourceBufferRef.current) {
+            // 将接收到的数据直接加入队列
+            queueRef.current.push(event.data);
+            
+            // 如果这是初始数据块，确保视频src已经设置
+            if (receivedSizeRef.current <= event.data.byteLength) {
+              log(`已接收第一个数据块，大小: ${event.data.byteLength} 字节`);
+              
+              // 确保视频元素设置了src属性
+              if (!videoPlayerRef.current.src) {
+                log('检测到视频src为空，重新设置...');
+                if (mediaSourceRef.current) {
+                  const objectUrl = URL.createObjectURL(mediaSourceRef.current);
+                  videoPlayerRef.current.src = objectUrl;
+                  log(`设置视频src: ${objectUrl}`);
+                  videoPlayerRef.current.load();
+                } else {
+                  log('警告: MediaSource未就绪，无法设置视频src');
+                  // 尝试重新初始化MediaSource
+                  setupMediaSource().catch(err => {
+                    log(`MediaSource初始化失败: ${err.message}`);
+                  });
+                }
+              } else {
+                log(`确认视频src已设置: ${videoPlayerRef.current.src}`);
+              }
+            }
+            
+            // 如果缓冲区准备好，立即处理队列
+            if (isBufferReadyRef.current) {
+              processQueue();
+            }
+            
+            // 检查和记录接收进度
+            if (receivedSizeRef.current % (1024 * 1024) < event.data.byteLength) {
+              log(`已接收 ${(receivedSizeRef.current / (1024 * 1024)).toFixed(2)} MB 的视频数据`);
+            }
+          } else {
+            // 如果MediaSource还没准备好，先收集数据
+            videoReceiveBufferRef.current.push(event.data);
+            
+            // 如果收集了一定量的数据，尝试初始化MediaSource
+            if (videoReceiveBufferRef.current.length === 1) {
+              log(`已收集数据，等待MediaSource就绪...`);
+              if (!mediaSourceRef.current) {
+                setupMediaSource();
+              }
+            }
           }
         }
       }
@@ -437,26 +597,76 @@ export default function PPlayer() {
       return;
     }
     
-    // 清理旧的视频数据
+    // 首先重置播放器
     resetPlayer();
     
-    // 请求文件
-    log(`请求文件: ${filePathInput}`);
-    dataChannelRef.current.send(filePathInput);
+    // 确保MediaSource已设置好
+    const setupAndRequest = async () => {
+      try {
+        log('开始设置MediaSource...');
+        await setupMediaSource();
+        
+        // 确认视频元素已设置src
+        if (!videoPlayerRef.current.src && mediaSourceRef.current) {
+          const objectUrl = URL.createObjectURL(mediaSourceRef.current);
+          videoPlayerRef.current.src = objectUrl;
+          log(`设置视频src: ${objectUrl}`);
+          videoPlayerRef.current.load();
+        }
+        
+        // 确认src已设置
+        if (!videoPlayerRef.current.src) {
+          throw new Error('无法设置视频src属性');
+        }
+        
+        // MediaSource准备就绪，发送请求
+        log(`请求文件: ${filePathInput}`);
+        dataChannelRef.current.send(JSON.stringify({
+          type: 'request-file',
+          path: filePathInput
+        }));
+      } catch (error) {
+        log(`设置媒体源失败: ${error.message}`);
+      }
+    };
+    
+    setupAndRequest();
   };
   
   // 初始化MediaSource
   const setupMediaSource = async () => {
     try {
+      log('初始化MediaSource...');
+      
+      // 如果已经存在并且开启状态，直接使用
+      if (mediaSourceRef.current && mediaSourceRef.current.readyState === 'open') {
+        log('MediaSource已处于打开状态，跳过初始化');
+        return;
+      }
+      
+      // 如果已经存在但不是open状态，先清理
+      if (mediaSourceRef.current) {
+        log('释放旧的MediaSource...');
+        resetPlayer();
+      }
+      
       // 创建MediaSource
       mediaSourceRef.current = new MediaSource();
       setVideoVisible(true);
       
-      // 连接到视频元素
-      videoPlayerRef.current.src = URL.createObjectURL(mediaSourceRef.current);
-      videoPlayerRef.current.load();
+      // 立即连接到视频元素
+      if (videoPlayerRef.current) {
+        const objectUrl = URL.createObjectURL(mediaSourceRef.current);
+        videoPlayerRef.current.src = objectUrl;
+        log(`设置视频src: ${objectUrl}`);
+        videoPlayerRef.current.load();
+      } else {
+        log('错误: 视频元素尚未准备好');
+        throw new Error('视频元素未准备好');
+      }
       
       // 等待MediaSource打开
+      log('等待MediaSource打开...');
       await waitForSourceOpen(mediaSourceRef.current);
       log('MediaSource已打开，添加SourceBuffer...');
       
@@ -501,6 +711,8 @@ export default function PPlayer() {
       // 添加事件监听器
       sourceBuffer.addEventListener('updateend', () => {
         isBufferReadyRef.current = true;
+        
+        // 处理队列中剩余的数据
         processQueue();
         
         // 记录缓冲区状态
@@ -508,10 +720,43 @@ export default function PPlayer() {
           const start = sourceBuffer.buffered.start(0);
           const end = sourceBuffer.buffered.end(0);
           log(`缓冲区状态: ${start.toFixed(2)}s - ${end.toFixed(2)}s (${(end-start).toFixed(2)}s)`);
+          
+          // 如果视频暂停了但有足够的缓冲，尝试播放
+          if (videoPlayerRef.current && videoPlayerRef.current.paused && 
+              end - videoPlayerRef.current.currentTime > 2) {
+            playVideo();
+          }
         }
       });
       
+      sourceBuffer.addEventListener('error', (e) => {
+        log(`SourceBuffer错误: ${e.message || '未知错误'}`);
+      });
+      
       // 添加视频播放事件监听
+      videoPlayerRef.current.addEventListener('timeupdate', () => {
+        // 检查并清理过时的缓冲区
+        if (sourceBufferRef.current && sourceBufferRef.current.buffered.length > 0) {
+          const currentTime = videoPlayerRef.current.currentTime;
+          const bufferedStart = sourceBufferRef.current.buffered.start(0);
+          const bufferedEnd = sourceBufferRef.current.buffered.end(0);
+          
+          // 记录当前播放进度和缓冲状态
+          if (currentTime % 5 < 0.1) {  // 每5秒记录一次
+            log(`播放进度: ${currentTime.toFixed(2)}s，缓冲区: ${bufferedStart.toFixed(2)}s - ${bufferedEnd.toFixed(2)}s`);
+          }
+          
+          // 智能清理：播放位置超过缓冲区开始10秒，且缓冲区总长度超过30秒
+          if (currentTime - bufferedStart > 10 && bufferedEnd - bufferedStart > 30) {
+            if (!sourceBufferRef.current.updating) {
+              const removeEnd = currentTime - 5;
+              log(`自动清理缓冲区: ${bufferedStart.toFixed(2)}s 到 ${removeEnd.toFixed(2)}s`);
+              sourceBufferRef.current.remove(bufferedStart, removeEnd);
+            }
+          }
+        }
+      });
+      
       videoPlayerRef.current.addEventListener('playing', () => {
         setIsPlaying(true);
         setAutoplayBlocked(false);
@@ -527,6 +772,31 @@ export default function PPlayer() {
         log(`视频错误: ${e.target.error?.message || '未知错误'}`);
       });
       
+      videoPlayerRef.current.addEventListener('stalled', () => {
+        log('视频播放已停滞');
+      });
+      
+      videoPlayerRef.current.addEventListener('waiting', () => {
+        log('视频正在等待更多数据...');
+      });
+      
+      // 如果已经收集了数据，现在处理它们
+      if (videoReceiveBufferRef.current.length > 0) {
+        log(`处理已收集的 ${videoReceiveBufferRef.current.length} 个数据块...`);
+        
+        // 将所有收集的数据添加到队列
+        videoReceiveBufferRef.current.forEach(buffer => {
+          queueRef.current.push(buffer);
+        });
+        
+        // 清空临时缓冲区
+        videoReceiveBufferRef.current = [];
+        
+        // 处理队列
+        if (isBufferReadyRef.current) {
+          processQueue();
+        }
+      }
     } catch (error) {
       log(`设置MediaSource失败: ${error.message}`);
     }
@@ -535,44 +805,77 @@ export default function PPlayer() {
   // 播放视频 (用于自动播放被阻止时的手动播放)
   const playVideo = () => {
     if (videoPlayerRef.current) {
+      // 确认src已设置
+      if (!videoPlayerRef.current.src || videoPlayerRef.current.src === '') {
+        log('无法播放视频，src属性为空');
+        
+        // 尝试重新设置src
+        if (mediaSourceRef.current) {
+          const objectUrl = URL.createObjectURL(mediaSourceRef.current);
+          videoPlayerRef.current.src = objectUrl;
+          log(`重新设置视频src: ${objectUrl}`);
+          videoPlayerRef.current.load();
+        } else {
+          log('无法播放：MediaSource未初始化');
+          return;
+        }
+      }
+      
+      log('尝试播放视频...');
       videoPlayerRef.current.play()
         .then(() => {
           setIsPlaying(true);
           setAutoplayBlocked(false);
+          log('视频开始播放');
         })
         .catch(err => {
           log(`播放失败: ${err.message}`);
         });
+    } else {
+      log('视频元素未找到，无法播放');
     }
   };
   
   // 重置播放器状态
   const resetPlayer = () => {
+    log('重置播放器状态...');
+    
     // 清理MediaSource相关资源
     if (mediaSourceRef.current) {
       try {
+        // 先记录src
+        const currentSrc = videoPlayerRef.current?.src;
+        
         if (mediaSourceRef.current.readyState === 'open') {
           mediaSourceRef.current.endOfStream();
+          log('MediaSource流已结束');
+        }
+        
+        // 移除SourceBuffer
+        if (sourceBufferRef.current && mediaSourceRef.current.readyState !== 'closed') {
+          try {
+            mediaSourceRef.current.removeSourceBuffer(sourceBufferRef.current);
+            log('已移除SourceBuffer');
+          } catch (e) {
+            log(`移除SourceBuffer时出错: ${e.message}`);
+          }
+        }
+        
+        // 释放URL对象
+        if (currentSrc && currentSrc.startsWith('blob:')) {
+          URL.revokeObjectURL(currentSrc);
+          log(`已释放Blob URL: ${currentSrc}`);
+        }
+        
+        if (videoPlayerRef.current) {
+          videoPlayerRef.current.src = '';
+          videoPlayerRef.current.load();
         }
       } catch (e) {
         log(`关闭MediaSource时出错: ${e.message}`);
       }
-      
-      // 移除SourceBuffer
-      if (sourceBufferRef.current && mediaSourceRef.current.readyState !== 'closed') {
-        try {
-          mediaSourceRef.current.removeSourceBuffer(sourceBufferRef.current);
-        } catch (e) {
-          log(`移除SourceBuffer时出错: ${e.message}`);
-        }
-      }
-      
-      // 释放URL对象
-      if (videoPlayerRef.current && videoPlayerRef.current.src) {
-        URL.revokeObjectURL(videoPlayerRef.current.src);
-        videoPlayerRef.current.src = '';
-        videoPlayerRef.current.load();
-      }
+    } else {
+      log('没有活动的MediaSource需要重置');
     }
     
     // 重置引用
