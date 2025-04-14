@@ -21,7 +21,7 @@
 /frontend/.env
 /frontend/nohup.out
 
-/signalingv2/fanren.mp4
+/signalingv2/*.mp4
 
 # IDE and OS specific files
 .DS_Store
