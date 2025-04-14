@@ -2,14 +2,20 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
+	"github.com/pion/webrtc/v4/pkg/media/h264reader"
 )
+
+const h264FrameDuration = time.Millisecond * 33
 
 // Message 定义消息结构，新增 Role 字段
 type Message struct {
@@ -127,53 +133,64 @@ func handleWebSocketMessages(conn *websocket.Conn, peerConnection *webrtc.PeerCo
 
 // 通过 DataChannel 发送文件
 func sendFileToPeer(peerConnection *webrtc.PeerConnection, filePath string) {
-	// 打开文件
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Println("打开文件失败:", err)
-		return
-	}
-	// 注意：不要在这里关闭文件（移除 defer file.Close()）
-
-	// 创建 DataChannel，用于文件传输
-	dataChannel, err := peerConnection.CreateDataChannel("fileTransfer", nil)
-	if err != nil {
-		log.Println("创建 DataChannel 失败:", err)
-		file.Close() // 若出错，则及时关闭文件
-		return
+	// Create a video track
+	videoTrack, videoTrackErr := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "pion")
+	if videoTrackErr != nil {
+		panic(videoTrackErr)
 	}
 
-	dataChannel.OnOpen(func() {
-		fmt.Println("DataChannel 已打开")
-		// 直接调用 sendFile，不需用 goroutine 包裹（或可根据需求调整）
-		sendFile(file, dataChannel)
-	})
-}
+	rtpSender, videoTrackErr := peerConnection.AddTrack(videoTrack)
+	if videoTrackErr != nil {
+		panic(videoTrackErr)
+	}
 
-func sendFile(file *os.File, dataChannel *webrtc.DataChannel) {
-	buffer := make([]byte, 1024*64) // 分块大小 64KB
-	for {
-		n, err := file.Read(buffer)
-		if err == io.EOF {
-			break
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
 		}
-		if err != nil {
-			log.Println("读取文件失败:", err)
-			break
+	}()
+
+	go func() {
+		// Open a H264 file and start reading using our IVFReader
+		file, h264Err := os.Open(filePath)
+		if h264Err != nil {
+			panic(h264Err)
 		}
-		if err := dataChannel.Send(buffer[:n]); err != nil {
-			log.Println("发送文件块失败:", err)
-			break
+
+		h264, h264Err := h264reader.NewReader(file)
+		if h264Err != nil {
+			panic(h264Err)
 		}
-	}
-	// 文件传输完成后，发送文件结束标志信号给 C
-	endMsg := "FILE_END"
-	if err := dataChannel.Send([]byte(endMsg)); err != nil {
-		log.Println("发送文件结束标志失败:", err)
-	} else {
-		log.Println("成功发送文件结束标志")
-	}
-	fmt.Println("文件传输完成")
+
+		// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
+		// This isn't required since the video is timestamped, but we will such much higher loss if we send all at once.
+		//
+		// It is important to use a time.Ticker instead of time.Sleep because
+		// * avoids accumulating skew, just calling time.Sleep didn't compensate for the time spent parsing the data
+		// * works around latency issues with Sleep (see https://github.com/golang/go/issues/44343)
+		ticker := time.NewTicker(h264FrameDuration)
+		for ; true; <-ticker.C {
+			nal, h264Err := h264.NextNAL()
+			if errors.Is(h264Err, io.EOF) {
+				fmt.Printf("All video frames parsed and sent")
+				os.Exit(0)
+			}
+			if h264Err != nil {
+				panic(h264Err)
+			}
+
+			if h264Err = videoTrack.WriteSample(media.Sample{Data: nal.Data, Duration: h264FrameDuration}); h264Err != nil {
+				panic(h264Err)
+			}
+			fmt.Println("向前端发送一条消息")
+		}
+	}()
 }
 
 func main() {
