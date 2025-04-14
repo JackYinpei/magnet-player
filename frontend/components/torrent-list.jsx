@@ -183,7 +183,7 @@ export function TorrentList() {
       console.log(newTorrents);
       // Merge the new torrent data with existing movie details
       setMovies(prevMovies => {
-        return newTorrents.map(newTorrent => {
+        return newTorrents?.map(newTorrent => {
           // Find matching movie in the previous state
           const existingMovie = prevMovies.find(m => m.infoHash === newTorrent.infoHash);
           // Preserve movieDetails from existing movie if available
@@ -209,7 +209,7 @@ export function TorrentList() {
     <div className="container mx-auto py-6 px-4">
       <h1 className="text-3xl font-bold mb-6">影片列表</h1>
       <div className="grid grid-cols-1 gap-6">
-        {movies.map((movie, i) => (
+        {movies?.map((movie, i) => (
           <MovieCard key={i} movie={movie} />
         ))}
       </div>

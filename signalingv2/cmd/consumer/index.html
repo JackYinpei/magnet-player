@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>Consumer Client (C) - 视频播放</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+    }
+
+    #videoPlayer {
+      background: #000;
+    }
+
+    #log {
+      border: 1px solid #ccc;
+      padding: 10px;
+      height: 300px;
+      overflow: auto;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>消费者客户端 (C)</h1>
+  <div>
+    <label for="filePathInput">文件路径：</label>
+    <input type="text" id="filePathInput" placeholder="请输入文件路径">
+    <!-- 初始禁用请求按钮 -->
+    <button id="requestButton" disabled>请求文件</button>
+  </div>
+  <br>
+  <video id="videoPlayer" controls autoplay width="640" height="360"></video>
+  <h3>日志输出</h3>
+  <pre id="log"></pre>
+
+  <script>
+    // 简单的日志打印函数：既输出到控制台，也输出到页面中
+    function logMsg(msg) {
+      console.log(msg);
+      const logArea = document.getElementById("log");
+      logArea.textContent += msg + "\n";
+      // 自动滚动到底部
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    // 信令服务器地址（请根据实际情况修改）
+    const signalingServerUrl = "ws://43.156.74.32:8090/ws";
+    let ws;                // WebSocket 对象
+    let pc;                // RTCPeerConnection 对象
+    let filePathChannel;   // 用于发送文件路径的 data channel
+    let fileTransferChannel; // 用于接收文件数据的 data channel
+    let mediaSource;       // MediaSource 对象
+    let sourceBuffer;      // SourceBuffer 对象
+    let bufferQueue = [];  // 暂存接收到的数据块
+    let mediaEndReached = false; // 是否收到文件结束标记
+
+    // 视频 MIME 类型（根据实际文件格式修改，MP4格式）
+    const mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
+
+    // 连接信令服务器，并注册身份为 C
+    function connectSignaling() {
+      ws = new WebSocket(signalingServerUrl);
+      ws.onopen = () => {
+        logMsg("已连接信令服务器");
+        // 注册消息，告知服务器本客户端为消费者（C）
+        const registerMsg = { type: "register", role: "C" };
+        ws.send(JSON.stringify(registerMsg));
+        // 连接成功后建立 PeerConnection
+        createPeerConnection();
+      };
+
+      ws.onmessage = (event) => {
+        let msg;
+        try {
+          msg = JSON.parse(event.data);
+        } catch (e) {
+          logMsg("信令消息解析失败: " + e);
+          return;
+        }
+        // 处理信令消息
+        if (msg.type === "answer") {
+          logMsg("收到 answer");
+          const answer = { type: "answer", sdp: msg.sdp };
+          pc.setRemoteDescription(new RTCSessionDescription(answer))
+            .then(() => logMsg("已设置远端描述 (answer)"))
+            .catch(err => logMsg("设置远端描述失败: " + err));
+        } else if (msg.type === "candidate") {
+          logMsg("收到 ICE candidate: " + msg.candidate);
+          try {
+            const candidate = JSON.parse(msg.candidate);
+            pc.addIceCandidate(candidate)
+              .then(() => logMsg("成功添加 ICE candidate"))
+              .catch(err => logMsg("添加 ICE candidate 失败: " + err));
+          } catch (err) {
+            logMsg("ICE candidate 解析失败: " + err);
+          }
+        }
+      };
+
+      ws.onerror = (err) => {
+        logMsg("WebSocket 错误: " + err);
+      };
+    }
+
+    // 创建 RTCPeerConnection 对象，配置 ICE 处理、数据通道等
+    function createPeerConnection() {
+      const config = {
+        iceServers: [
+          {
+            urls: ["stun:stun.l.google.com:19302"]
+          }
+          // 如果需要 TURN 服务器，也可以添加 TURN 配置
+        ]
+      };
+      pc = new RTCPeerConnection(config);
+
+      // ICE 候选生成时
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          logMsg("onicecandidate 生成候选: " + JSON.stringify(event.candidate));
+          const msg = {
+            type: "candidate",
+            candidate: JSON.stringify(event.candidate.toJSON())
+          };
+          ws.send(JSON.stringify(msg));
+          logMsg("ICE Candidate 发送成功");
+        } else {
+          logMsg("ICE Candidate 收集完成");
+        }
+      };
+
+      // ICE gathering 状态变化
+      pc.onicegatheringstatechange = () => {
+        logMsg("ICE gathering state: " + pc.iceGatheringState);
+      };
+
+      // ICE 连接状态变化
+      pc.oniceconnectionstatechange = () => {
+        logMsg("ICE connection state: " + pc.iceConnectionState);
+      };
+
+      // PeerConnection 状态变化
+      pc.onsignalingstatechange = () => {
+        logMsg("Signaling state change: " + pc.signalingState);
+      };
+      pc.onconnectionstatechange = () => {
+        logMsg("Connection state change: " + pc.connectionState);
+      };
+
+      // 当 B 创建 fileTransfer 数据通道时触发
+      pc.ondatachannel = (event) => {
+        logMsg("收到远端数据通道: " + event.channel.label);
+        if (event.channel.label === "fileTransfer") {
+          fileTransferChannel = event.channel;
+          fileTransferChannel.binaryType = "arraybuffer";
+          fileTransferChannel.onopen = () => {
+            logMsg("fileTransfer 数据通道已打开");
+          };
+          fileTransferChannel.onclose = () => {
+            logMsg("fileTransfer 数据通道已关闭");
+          };
+          fileTransferChannel.onerror = (e) => {
+            logMsg("fileTransfer 数据通道错误: " + JSON.stringify(e));
+          };
+          // 在 fileTransferChannel 的 onmessage 处理逻辑中
+          fileTransferChannel.onmessage = (event) => {
+            // 检查是否为控制消息（字符串类型）
+            if (typeof event.data === 'string') {
+              logMsg("收到控制消息: " + event.data);
+              if (event.data === "FILE_END") {
+                logMsg("文件传输结束");
+                // 只有当所有缓冲数据都处理完毕时，才结束媒体流
+                if (sourceBuffer && !sourceBuffer.updating && bufferQueue.length === 0) {
+                  mediaSource.endOfStream();
+                  logMsg("结束媒体流");
+                } else {
+                  // 设置标记，待所有数据处理完成后结束流
+                  mediaEndReached = true;
+                  logMsg("设置媒体结束标记，等待所有数据处理完成");
+                }
+                return;
+              }
+            } else {
+              // 处理二进制数据（视频块）
+              logMsg("fileTransfer 收到数据块, 大小:" + event.data.byteLength);
+              if (sourceBuffer && !sourceBuffer.updating) {
+                tryAppendBuffer(event.data);
+              } else {
+                bufferQueue.push(event.data);
+              }
+            }
+          };
+        }
+      };
+
+      // 创建数据通道用于发送文件路径给 B
+      filePathChannel = pc.createDataChannel("filePathChannel");
+      filePathChannel.onopen = () => {
+        logMsg("filePathChannel 已打开");
+        // 数据通道打开后启用请求按钮
+        document.getElementById("requestButton").disabled = false;
+      };
+      filePathChannel.onclose = () => {
+        logMsg("filePathChannel 已关闭");
+      };
+      filePathChannel.onerror = (e) => {
+        logMsg("filePathChannel 错误: " + JSON.stringify(e));
+      };
+      filePathChannel.onmessage = (event) => {
+        logMsg("filePathChannel 收到消息: " + event.data);
+      };
+
+      // 创建本端 offer，并通过信令通道发送给 B
+      pc.createOffer().then(offer => {
+        logMsg("创建 offer 成功: " + JSON.stringify(offer));
+        return pc.setLocalDescription(offer);
+      }).then(() => {
+        logMsg("已设置本地描述");
+        const msg = { type: "offer", sdp: pc.localDescription.sdp };
+        ws.send(JSON.stringify(msg));
+        logMsg("offer 发送成功");
+      }).catch(error => {
+        logMsg("创建 offer 过程中出错:" + error);
+      });
+    }
+
+    // 设置 MediaSource 对象，并挂载到 video 元素上
+    function setupMediaSource() {
+      const video = document.getElementById("videoPlayer");
+
+      // 设置视频错误处理
+      video.onerror = function () {
+        logMsg("视频播放错误: " + video.error.code + " - " + (video.error.message || "未知错误"));
+      };
+
+      mediaSource = new MediaSource();
+      video.src = URL.createObjectURL(mediaSource);
+
+      // 添加 MediaSource 所有状态的事件监听
+      mediaSource.addEventListener("sourceopen", () => {
+        logMsg("MediaSource 已打开，当前状态: " + mediaSource.readyState);
+        try {
+          sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+        } catch (e) {
+          logMsg("添加 SourceBuffer 失败，请检查 MIME 类型和浏览器支持情况: " + e);
+          return;
+        }
+        sourceBuffer.mode = "segments";
+        sourceBuffer.addEventListener("updateend", () => {
+          logMsg("SourceBuffer 更新结束");
+          if (bufferQueue.length > 0 && !sourceBuffer.updating) {
+            tryAppendBuffer(bufferQueue.shift());
+          } else if (mediaEndReached && !sourceBuffer.updating && bufferQueue.length === 0) {
+            // 所有数据处理完成，现在可以安全地结束流
+            logMsg("所有数据处理完成，结束媒体流");
+            mediaSource.endOfStream();
+          }
+        });
+
+        // 添加 error 事件监听
+        sourceBuffer.addEventListener("error", (e) => {
+          logMsg("SourceBuffer 错误: " + e);
+        });
+      });
+
+      // 添加更多 MediaSource 状态监听
+      mediaSource.addEventListener("sourceended", () => {
+        logMsg("MediaSource ended - 状态变为 'ended'");
+      });
+
+      mediaSource.addEventListener("sourceclose", () => {
+        logMsg("MediaSource closed - 状态变为 'closed'");
+      });
+    }
+
+    // 尝试把数据块追加到 SourceBuffer 中（增加对 mediaSource 状态的判断）
+    function tryAppendBuffer(chunk) {
+      // 如果 MediaSource 不在 open 状态，则暂存当前数据块
+      if (mediaSource.readyState !== "open") {
+        logMsg("MediaSource 当前状态: " + mediaSource.readyState + "，无法追加数据块");
+        // 将数据块放入队列以便状态恢复时处理
+        bufferQueue.push(chunk);
+        return;
+      }
+
+      // 确保 sourceBuffer 存在且未处于更新状态
+      if (sourceBuffer && !sourceBuffer.updating) {
+        try {
+          sourceBuffer.appendBuffer(chunk);
+          logMsg("追加数据块成功, 大小:" + chunk.byteLength);
+        } catch (error) {
+          logMsg("追加数据块错误: " + error);
+          // 处理缓冲区已满错误
+          if (error.name === 'QuotaExceededError') {
+            // 从缓冲区开始处移除一些数据
+            logMsg("缓冲区已满，尝试移除旧数据");
+            const currentTime = document.getElementById("videoPlayer").currentTime;
+            // 移除从0到当前播放时间前2秒的数据
+            if (currentTime > 2) {
+              sourceBuffer.remove(0, currentTime - 2);
+              logMsg("移除从0到" + (currentTime - 2) + "秒的数据");
+            }
+            // 将当前块放回队列头部，稍后再尝试
+            bufferQueue.unshift(chunk);
+          }
+        }
+      } else {
+        // sourceBuffer不存在或正在更新，将数据块放入队列
+        bufferQueue.push(chunk);
+      }
+    }
+
+    // 点击请求按钮时，从输入框获取文件路径，并通过 filePathChannel 发送出去
+    function requestFile() {
+      const filePathInput = document.getElementById("filePathInput");
+      const filePath = filePathInput.value.trim();
+      if (!filePath) {
+        alert("请输入文件路径");
+        return;
+      }
+      // 确保数据通道已经打开
+      if (!filePathChannel || filePathChannel.readyState !== "open") {
+        alert("数据通道未打开，请稍候再试。");
+        return;
+      }
+      // 重置任何之前的状态
+      mediaEndReached = false;
+      bufferQueue = [];
+
+      // 重新初始化 MediaSource
+      const video = document.getElementById("videoPlayer");
+
+      // 创建全新的 MediaSource
+      mediaSource = new MediaSource();
+      video.src = URL.createObjectURL(mediaSource);
+
+      // 设置 MediaSource 事件处理程序
+      mediaSource.addEventListener("sourceopen", () => {
+        logMsg("新的 MediaSource 已打开，当前状态: " + mediaSource.readyState);
+        try {
+          sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+          sourceBuffer.mode = "segments";
+          sourceBuffer.addEventListener("updateend", () => {
+            logMsg("SourceBuffer 更新结束");
+            if (bufferQueue.length > 0 && !sourceBuffer.updating) {
+              tryAppendBuffer(bufferQueue.shift());
+            } else if (mediaEndReached && !sourceBuffer.updating && bufferQueue.length === 0) {
+              logMsg("所有数据处理完成，结束媒体流");
+              mediaSource.endOfStream();
+            }
+          });
+
+          sourceBuffer.addEventListener("error", (e) => {
+            logMsg("SourceBuffer 错误: " + e);
+          });
+
+          // 发送文件路径请求
+          filePathChannel.send(JSON.stringify(filePath));
+          logMsg("发送文件路径: " + filePath);
+        } catch (e) {
+          logMsg("添加新的 SourceBuffer 失败: " + e);
+        }
+      });
+
+      mediaSource.addEventListener("sourceended", () => {
+        logMsg("MediaSource ended - 状态变为 'ended'");
+      });
+
+      mediaSource.addEventListener("sourceclose", () => {
+        logMsg("MediaSource closed - 状态变为 'closed'");
+      });
+    }
+
+    document.getElementById("requestButton")
+      .addEventListener("click", requestFile);
+
+    // 页面加载时初始化 MediaSource 和信令连接
+    window.onload = () => {
+      setupMediaSource();
+      connectSignaling();
+    };
+  </script>
+</body>
+
+</html>
