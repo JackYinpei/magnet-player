@@ -47,8 +47,7 @@
   <br>
   <br />
 
-  Video<br />
-  <div id="remoteVideos"></div> <br />
+  <video id="video" width="640" height="360" controls autoplay muted style="background:#000;"></video>
   <h3>日志输出</h3>
   <pre id="log"></pre>
 
@@ -73,15 +72,30 @@
     let ws;                // WebSocket 对象
     let pc;                // RTCPeerConnection 对象
     let filePathChannel;   // 用于发送文件路径的 data channel
-    let fileTransferChannel; // 用于接收文件数据的 data channel
-    let mediaSource;       // MediaSource 对象
-    let sourceBuffer;      // SourceBuffer 对象
-    let bufferQueue = [];  // 暂存接收到的数据块
-    let mediaEndReached = false; // 是否收到文件结束标记
-    let receivedInitSegment = false; // 是否已接收到初始化片段
-    let initSegmentData = null; // 存储初始化片段数据
-    let firstChunk = null; // 存储第一个数据块，用于MIME类型检测
-    let detectedMimeType = null; // 检测到的MIME类型
+    const video = document.getElementById('video');
+    const statusDiv = document.getElementById('status');
+    let mediaSource = new MediaSource();
+    let sourceBuffer;
+    let queue = [];
+    let mimeCodec = 'video/mp4; codecs="avc1.42E01E"'; // baseline H264 in mp4
+
+    video.src = URL.createObjectURL(mediaSource);
+
+    mediaSource.addEventListener('sourceopen', onSourceOpen);
+
+    function onSourceOpen() {
+      sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+      sourceBuffer.mode = 'segments';
+      sourceBuffer.addEventListener('updateend', appendFromQueue);
+      connectWS();
+    }
+
+    function appendFromQueue() {
+      if (queue.length && !sourceBuffer.updating) {
+        sourceBuffer.appendBuffer(queue.shift());
+      }
+    }
+
 
 
     // 连接信令服务器，并注册身份为 C
@@ -161,8 +175,7 @@
         if (pc.iceConnectionState === 'disconnected' ||
           pc.iceConnectionState === 'failed' ||
           pc.iceConnectionState === 'closed') {
-          logMsg("ICE 连接已断开或失败，将重新连接");
-          resetConnection();
+          logMsg("ICE 连接已断开或失败。");
         }
       };
 
@@ -170,17 +183,6 @@
       pc.onconnectionstatechange = () => {
         logMsg("Connection state change: " + pc.connectionState);
       };
-
-      pc.ontrack = function (event) {
-        logMsg("Connection on track")
-        var el = document.createElement(event.track.kind)
-        el.srcObject = event.streams[0]
-        el.autoplay = true
-        el.controls = true
-
-        document.getElementById('remoteVideos').appendChild(el)
-        logMsg("Append video div done")
-      }
 
       // 创建数据通道用于发送文件路径给 B
       filePathChannel = pc.createDataChannel("filePathChannel");
@@ -195,6 +197,17 @@
       };
       filePathChannel.onerror = (e) => {
         logMsg("filePathChannel 错误: " + e);
+      };
+
+      filePathChannel.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          // 这里假设后端发来的是完整的 mp4 分片（fMP4）
+          if (!sourceBuffer.updating) {
+            sourceBuffer.appendBuffer(new Uint8Array(event.data));
+          } else {
+            queue.push(new Uint8Array(event.data));
+          }
+        }
       };
 
       // 创建本端 offer，并通过信令通道发送给 B
@@ -217,11 +230,6 @@
       const filePath = filePathInput.value.trim();
       if (!filePath) {
         alert("请输入文件路径");
-        return;
-      }
-      // 确保数据通道已经打开
-      if (!filePathChannel || filePathChannel.readyState !== "open") {
-        alert("数据通道未打开，请稍候再试。");
         return;
       }
 

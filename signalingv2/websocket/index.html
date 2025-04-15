@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MSE WebSocket Player</title>
+    <style>
+        body { background: #181c24; color: #eee; font-family: sans-serif; }
+        #player-container { margin: 40px auto; width: 640px; text-align: center; }
+        video { background: #000; display: block; margin: 0 auto; }
+        #status { margin-top: 10px; }
+    </style>
+</head>
+<body>
+<div id="player-container">
+    <h2>MSE WebSocket Player</h2>
+    <div id="status">Connecting...</div>
+    <video id="video" width="640" height="360" controls autoplay muted style="background:#000;"></video>
+</div>
+<script>
+    const video = document.getElementById('video');
+    const statusDiv = document.getElementById('status');
+    let ws;
+    let mediaSource = new MediaSource();
+    let sourceBuffer;
+    let queue = [];
+    let mimeCodec = 'video/mp4; codecs="avc1.42E01E"'; // baseline H264 in mp4
+
+    video.src = URL.createObjectURL(mediaSource);
+
+    mediaSource.addEventListener('sourceopen', onSourceOpen);
+
+    function onSourceOpen() {
+        sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+        sourceBuffer.mode = 'segments';
+        sourceBuffer.addEventListener('updateend', appendFromQueue);
+        connectWS();
+    }
+
+    function appendFromQueue() {
+        if (queue.length && !sourceBuffer.updating) {
+            sourceBuffer.appendBuffer(queue.shift());
+        }
+    }
+
+    function connectWS() {
+        ws = new WebSocket('ws://localhost:8080/ws');
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = () => {
+            statusDiv.textContent = 'WebSocket connected.';
+        };
+        ws.onclose = () => {
+            statusDiv.textContent = 'WebSocket disconnected.';
+        };
+        ws.onerror = (e) => {
+            statusDiv.textContent = 'WebSocket error!';
+        };
+        ws.onmessage = (event) => {
+            if (event.data instanceof ArrayBuffer) {
+                // 这里假设后端发来的是完整的 mp4 分片（fMP4）
+                if (!sourceBuffer.updating) {
+                    sourceBuffer.appendBuffer(new Uint8Array(event.data));
+                } else {
+                    queue.push(new Uint8Array(event.data));
+                }
+            }
+        };
+    }
+</script>
+</body>
+</html>
