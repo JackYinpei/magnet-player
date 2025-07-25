@@ -1,14 +1,19 @@
 import { useState } from 'react';
-import { addMagnet, saveMovieDetails, saveTorrentData } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { useTorrentActions, useErrorHandler } from '@/lib/actions';
+import { useTorrents } from '@/lib/store';
 
 export function TorrentForm({ onTorrentAdded }) {
   const [magnetUri, setMagnetUri] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
+
+  const { addNewTorrent } = useTorrentActions();
+  const { torrentError } = useTorrents();
+  const { clearError } = useErrorHandler();
 
   // 验证磁力链接格式是否有效
   const isValidMagnetUri = (uri) => {
@@ -22,6 +27,7 @@ export function TorrentForm({ onTorrentAdded }) {
     // 清除之前的状态
     setError(null);
     setSuccess(false);
+    clearError();
     
     // 验证磁力链接
     if (!magnetUri.trim()) {
@@ -36,20 +42,8 @@ export function TorrentForm({ onTorrentAdded }) {
     
     try {
       setLoading(true);
-      const newTorrent = await addMagnet(magnetUri);
-      console.log("新增的：",newTorrent);
-      
-      // 保存种子数据到数据库
-      try {
-        await saveTorrentData(newTorrent.infoHash, newTorrent);
-        console.log("种子数据已保存到数据库");
-      } catch (saveErr) {
-        console.error("保存种子数据失败:", saveErr);
-        // 继续处理，不中断流程
-      }
-      
-      // 这一步可以先保存magnet 的基本信息
-      // await saveMovieDetails(newTorrent.InfoHash, newTorrent.MovieDetails);
+      const newTorrent = await addNewTorrent(magnetUri);
+      console.log("新增的：", newTorrent);
       
       // 重置表单
       setMagnetUri('');
@@ -67,12 +61,15 @@ export function TorrentForm({ onTorrentAdded }) {
     }
   };
 
+  // 显示错误信息（优先显示本地错误，然后是全局错误）
+  const displayError = error || torrentError;
+
   return (
     <div className="w-full max-w-3xl mx-auto space-y-4">
-      {error && (
+      {displayError && (
         <Alert variant="destructive">
           <AlertTitle>错误</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{displayError}</AlertDescription>
         </Alert>
       )}
       

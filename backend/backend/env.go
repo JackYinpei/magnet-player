@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"fmt"
 	"os"
 	"sync"
 
@@ -12,17 +13,26 @@ var (
 )
 
 // LoadEnv loads environment variables from .env file
+// Deprecated: Use config.Load() instead for better configuration management
 func LoadEnv() error {
 	var err error
 	once.Do(func() {
 		err = godotenv.Load()
+		if err != nil {
+			fmt.Println("No .env file found, using system environment variables")
+			err = nil // 不将缺少.env文件视为错误
+		}
 	})
 	return err
 }
 
+// LoadEnvFrom loads environment variables from specified file path
+// Deprecated: Use config.Load() instead for better configuration management
 func LoadEnvFrom(path string) {
 	once.Do(func() {
-		godotenv.Load(path)
+		if err := godotenv.Load(path); err != nil {
+			fmt.Printf("Warning: Could not load .env file from %s: %v\n", path, err)
+		}
 	})
 }
 

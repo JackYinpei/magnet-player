@@ -1,27 +1,27 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useEffect } from 'react';
 import { TorrentForm } from '@/components/torrent-form';
 import { TorrentList } from '@/components/torrent-list';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useUI } from '@/lib/store';
+import { useTorrentActions } from '@/lib/actions';
 
 export default function Home() {
-  const [torrents, setTorrents] = useState([]);
-  const [activeTab, setActiveTab] = useState('torrents');
-  const isInitialLoadRef = useRef(true);
+  const { activeTab, setActiveTab } = useUI();
+  const { loadTorrents } = useTorrentActions();
+
+  // 组件加载时获取种子列表
+  useEffect(() => {
+    loadTorrents();
+  }, [loadTorrents]);
 
   // 处理新添加的种子
-  const handleTorrentAdded = (newTorrent) => {
-    // 如果有返回新种子，直接添加到列表中
-    if (newTorrent) {
-      setTorrents(prev => [...prev, newTorrent]);
-    }
-    
+  const handleTorrentAdded = () => {
     // 添加成功后切换到种子列表页
     setActiveTab('torrents');
-    
-    // 强制重新加载，并将初始加载状态设置为 true 以显示加载指示器
-    isInitialLoadRef.current = true;
+    // 重新加载种子列表以获取最新状态
+    loadTorrents();
   };
 
   return (
@@ -42,7 +42,7 @@ export default function Home() {
           <div className="space-y-4">
             <h3 className="text-lg font-medium">添加磁力链接</h3>
             <p className="text-muted-foreground">
-              粘贴一个磁力链接来添加一个新的种子。链接格式应该以 &quot;magnet:?&quot; 开头。
+              粘贴一个磁力链接来添加一个新的种子。链接格式应该以 "magnet:?" 开头。
             </p>
             <TorrentForm onTorrentAdded={handleTorrentAdded} />
           </div>
